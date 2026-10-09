@@ -1,0 +1,1 @@
+export default function ErrorMessage({ message, onRetry }) { return <div className="state error"><span>!</span><div><strong>Request unavailable</strong><p>{message}</p>{onRetry && <button className="text-button" onClick={onRetry}>Try again</button>}</div></div> }

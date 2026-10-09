@@ -1,0 +1,1 @@
+import { Link } from 'react-router-dom'; export default function NotFound() { return <div className="not-found"><p className="eyebrow">404 / Lost signal</p><h1>Nothing lives here.</h1><Link className="primary-button" to="/dashboard">Return to dashboard →</Link></div> }
