@@ -66,7 +66,7 @@ function isUrlInScope(candidateUrl, startUrl, scopeType = "single_url") {
   }
 
   if (scopeType === "single_url") {
-    return candidate.origin === start.origin;
+    return candidate.pathname.startsWith(start.pathname);
   }
 
   if (scopeType === "domain") {

@@ -97,7 +97,6 @@ export default function NewScan() {
       authorization_confirmed: false, 
       passive: true, 
       spider: true,
-      scope_type: 'single_url', // Forced to single_url
       authentication_type: 'none' // Forced to none
     }));
   };
@@ -131,7 +130,6 @@ export default function NewScan() {
     const payload = { 
       ...form, 
       active: false, 
-      scope_type: 'single_url', 
       authentication_type: 'none' 
     };
 
@@ -249,16 +247,32 @@ export default function NewScan() {
           <Section title="Target Scope" desc="Control how the crawler navigates the target structure.">
             <div className="radio-group">
               <label className="radio-label">
-                <input type="radio" name="scope" checked={true} readOnly /> 
+                <input 
+                  type="radio" 
+                  name="scope" 
+                  value="single_url"
+                  checked={form.scope_type === 'single_url'} 
+                  onChange={(e) => set('scope_type', e.target.value)} 
+                  disabled={loading}
+                /> 
                 Single URL only
               </label>
-              <label className="radio-label disabled" title="Domain scanning is currently disabled pending backend support.">
-                <input type="radio" name="scope" disabled /> 
-                Entire domain (Coming Soon)
+              <label className="radio-label">
+                <input 
+                  type="radio" 
+                  name="scope" 
+                  value="domain"
+                  checked={form.scope_type === 'domain'} 
+                  onChange={(e) => set('scope_type', e.target.value)}
+                  disabled={loading} 
+                /> 
+                Entire domain
               </label>
             </div>
             <p className="section-desc" style={{ marginTop: '8px', color: '#64748b' }}>
-              Note: The crawler will spider the site within the specified depth limit, but will strictly remain within the origin URL's path boundary.
+              {form.scope_type === 'single_url' 
+                ? "Note: The crawler will spider the site within the specified depth limit, but will strictly remain within the origin URL's path boundary." 
+                : "Note: The crawler will spider across the entire domain, matching the exact hostname, protocol, and port, but ignoring paths."}
             </p>
             
             <div className="form-group" style={{ marginTop: '12px' }}>
@@ -378,7 +392,7 @@ export default function NewScan() {
           
           <div className="summary-row"><span>Target</span> <b>{form.target_url || 'Not specified'}</b></div>
           <div className="summary-row"><span>Profile</span> <b>{profiles[form.scan_type].label}</b></div>
-          <div className="summary-row"><span>Scope</span> <b>Single URL boundary</b></div>
+          <div className="summary-row"><span>Scope</span> <b>{form.scope_type === 'domain' ? 'Entire domain boundary' : 'Single URL boundary'}</b></div>
           <div className="summary-row"><span>Auth Method</span> <b>None</b></div>
           <div className="summary-row"><span>Max Pages / Depth</span> <b>{form.max_pages} / {form.crawl_depth}</b></div>
           <div className="summary-row"><span>Active Checks</span> <b>{form.security_checks.length} selected</b></div>

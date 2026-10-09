@@ -76,3 +76,23 @@ Thumbs.db
 
 reports/*
 !reports/.gitkeep
+
+# Node.js
+node_modules/
+npm-debug.log*
+
+# Environment variables
+.env
+.env.*
+
+# Python virtual environments
+venv/
+.venv/
+env/
+ENV/
+__pycache__/
+*.py[cod]
+
+# vv folder
+vv/
+.vv/
