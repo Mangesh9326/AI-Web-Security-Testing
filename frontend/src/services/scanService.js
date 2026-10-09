@@ -5,6 +5,11 @@ export const getScans = async (params = {}) => {
   return response.data;
 };
 
+export const getDashboardMetrics = async () => {
+  const response = await api.get('/scans/dashboard/metrics');
+  return response.data;
+};
+
 export const getScan = async (id) => {
   const response = await api.get(`/scans/${id}`);
   return response.data;

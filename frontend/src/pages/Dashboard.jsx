@@ -1,391 +1,271 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   PieChart, Pie, Cell, Tooltip as RechartsTooltip, ResponsiveContainer, Legend,
   BarChart, Bar, XAxis, YAxis, CartesianGrid
 } from 'recharts';
-import api, { apiError } from '../services/api';
+import { getScans, getAllFindings } from '../services/scanService';
+import { getAlerts } from '../services/intrusionService';
 import { useAuth } from '../hooks/useAuth';
+import { ShieldAlert, Activity, Bug, ListOrdered, ArrowRight, RefreshCw } from 'lucide-react';
 
-const Dashboard = () => {
-  const auth = useAuth ? useAuth() : {};
-  const navigate = useNavigate();
+const COLORS = {
+  critical: '#ef4444',
+  high: '#f97316',
+  medium: '#eab308',
+  low: '#3b82f6',
+  info: '#06b6d4',
+  success: '#10b981'
+};
 
-  const [scans, setScans] = useState([]);
-  const [findings, setFindings] = useState([]);
+const StatCard = ({ title, value, icon: Icon, color, to }) => (
+  <div className="card">
+    <div className="p-6">
+      <div className="flex items-center">
+        <div className="flex-shrink-0">
+          <Icon className={`h-8 w-8 ${color}`} />
+        </div>
+        <div className="ml-5 w-0 flex-1">
+          <dl>
+            <dt className="text-sm font-medium text-slate-400 truncate">{title}</dt>
+            <dd>
+              <div className="text-2xl font-bold text-white">{value}</div>
+            </dd>
+          </dl>
+        </div>
+      </div>
+    </div>
+    {to && (
+      <div className="bg-slate-800/50 px-6 py-3 border-t border-slate-700">
+        <div className="text-sm">
+          <Link to={to} className="font-medium text-brand-400 hover:text-brand-300 flex items-center gap-1">
+            View all <ArrowRight className="h-4 w-4" />
+          </Link>
+        </div>
+      </div>
+    )}
+  </div>
+);
+
+export default function Dashboard() {
+  const { user } = useAuth();
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  
+  const [stats, setStats] = useState({
+    totalScans: 0,
+    runningScans: 0,
+    totalFindings: 0,
+    criticalFindings: 0,
+    totalAlerts: 0
+  });
 
-  const fetchDashboardData = useCallback(async () => {
+  const [severityData, setSeverityData] = useState([]);
+  const [recentScans, setRecentScans] = useState([]);
+  
+  const loadData = async () => {
     setLoading(true);
-    setError('');
     try {
-      const [scansRes, findingsRes] = await Promise.allSettled([
-        api.get('/scans'),
-        api.get('/findings'),
+      const [scansRes, findingsRes, alertsRes] = await Promise.all([
+        getScans(),
+        getAllFindings(),
+        getAlerts()
       ]);
 
-      if (scansRes.status === 'fulfilled') {
-        const scanList = Array.isArray(scansRes.value.data)
-          ? scansRes.value.data
-          : scansRes.value.data?.items || [];
-        setScans(scanList);
-      }
+      const scansData = scansRes.scans || scansRes.data || scansRes || [];
+      const scans = Array.isArray(scansData) ? scansData : [];
+      
+      const findingsData = findingsRes.findings || findingsRes.data || findingsRes || [];
+      const findings = Array.isArray(findingsData) ? findingsData : [];
+      
+      const alertsData = alertsRes.alerts || alertsRes.data || alertsRes || [];
+      const alerts = Array.isArray(alertsData) ? alertsData : [];
 
-      if (findingsRes.status === 'fulfilled') {
-        const findingList = Array.isArray(findingsRes.value.data)
-          ? findingsRes.value.data
-          : findingsRes.value.data?.items || [];
-        setFindings(findingList);
-      }
+      // Calculate Stats
+      const running = scans.filter(s => s.status === 'running' || s.status === 'pending').length;
+      const criticals = findings.filter(f => f.severity === 'critical').length;
+      
+      setStats({
+        totalScans: scans.length,
+        runningScans: running,
+        totalFindings: findings.length,
+        criticalFindings: criticals,
+        totalAlerts: alerts.length
+      });
+
+      // Prepare Chart Data
+      const sevCounts = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
+      findings.forEach(f => {
+        if (sevCounts[f.severity] !== undefined) sevCounts[f.severity]++;
+      });
+      
+      setSeverityData([
+        { name: 'Critical', value: sevCounts.critical, color: COLORS.critical },
+        { name: 'High', value: sevCounts.high, color: COLORS.high },
+        { name: 'Medium', value: sevCounts.medium, color: COLORS.medium },
+        { name: 'Low', value: sevCounts.low, color: COLORS.low },
+        { name: 'Info', value: sevCounts.info, color: COLORS.info }
+      ].filter(d => d.value > 0));
+
+      setRecentScans(scans.slice(0, 5));
+
     } catch (err) {
-      setError(apiError(err, 'Unable to load dashboard telemetry.'));
+      console.error("Dashboard data load error:", err);
     } finally {
       setLoading(false);
     }
-  }, []);
+  };
 
   useEffect(() => {
-    fetchDashboardData();
-  }, [fetchDashboardData]);
+    loadData();
+  }, []);
 
-  // Compute real severity counts
-  const countBySeverity = (level) =>
-    findings.filter((f) => (f.severity || '').toLowerCase() === level.toLowerCase()).length;
-
-  const criticalCount = countBySeverity('critical');
-  const highCount = countBySeverity('high');
-  const mediumCount = countBySeverity('medium');
-  const lowCount = countBySeverity('low');
-
-  const severityChartData = [
-    { name: 'Critical', value: criticalCount, color: '#dc2626' },
-    { name: 'High', value: highCount, color: '#ea580c' },
-    { name: 'Medium', value: mediumCount, color: '#eab308' },
-    { name: 'Low', value: lowCount, color: '#16a34a' },
-  ];
-
-  const scanStatusChartData = [
-    {
-      name: 'Completed',
-      count: scans.filter((s) => (s.status || '').toLowerCase() === 'completed').length,
-    },
-    {
-      name: 'Running / Pending',
-      count: scans.filter((s) =>
-        ['running', 'pending', 'in_progress', 'queued'].includes((s.status || '').toLowerCase())
-      ).length,
-    },
-    {
-      name: 'Failed',
-      count: scans.filter((s) => (s.status || '').toLowerCase() === 'failed').length,
-    },
-  ];
+  if (loading) {
+    return (
+      <div className="flex h-full items-center justify-center min-h-[400px]">
+        <RefreshCw className="h-8 w-8 animate-spin text-brand-500" />
+      </div>
+    );
+  }
 
   return (
-    <div style={{ maxWidth: '100%', overflowX: 'hidden' }}>
-      {/* 1. Header & Welcome */}
-      <div
-        className="page-header"
-        style={{
-          marginBottom: '24px',
-          display: 'flex',
-          flexWrap: 'wrap',
-          gap: '16px',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-        }}
-      >
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
         <div>
-          <p className="page-label">WORKSPACE / OVERVIEW</p>
-          <h1 style={{ margin: '0 0 6px 0' }}>
-            Welcome{auth?.user?.full_name ? `, ${auth.user.full_name}` : ''}
-          </h1>
-          <p className="page-description">
-            Real-time overview of your authorized web application security scans and classified findings.
+          <h2 className="text-2xl font-bold leading-7 text-white sm:truncate sm:text-3xl sm:tracking-tight">
+            Security Overview
+          </h2>
+          <p className="mt-1 text-sm text-slate-400">
+            Welcome back, {user?.fullName || user?.email || 'User'}. Here's what's happening.
           </p>
         </div>
-
-        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-          <button
-            onClick={fetchDashboardData}
-            disabled={loading}
-            style={{
-              padding: '10px 16px',
-              borderRadius: '8px',
-              backgroundColor: '#ffffff',
-              color: '#09090b',
-              border: '1px solid #d4d4d8',
-              fontSize: '13px',
-              fontWeight: 600,
-              cursor: 'pointer',
-            }}
-          >
-            {loading ? 'Refreshing...' : '↻ Refresh'}
-          </button>
-          <button
-            onClick={() => navigate('/new-scan')}
-            style={{
-              padding: '10px 18px',
-              borderRadius: '8px',
-              backgroundColor: '#09090b',
-              color: '#ffffff',
-              border: '1px solid #09090b',
-              fontSize: '13px',
-              fontWeight: 600,
-              cursor: 'pointer',
-            }}
-          >
-            + Start New Scan
-          </button>
+        <div>
+          <Link to="/new-scan" className="btn-primary">
+            New Scan
+          </Link>
         </div>
       </div>
 
-      {error && (
-        <div style={{ padding: '12px 16px', backgroundColor: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b', borderRadius: '8px', marginBottom: '20px', fontSize: '14px' }}>
-          ⚠ {error}
-        </div>
-      )}
+      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard 
+          title="Total Scans" 
+          value={stats.totalScans} 
+          icon={ListOrdered} 
+          color="text-blue-500"
+          to="/scans" 
+        />
+        <StatCard 
+          title="Running Scans" 
+          value={stats.runningScans} 
+          icon={RefreshCw} 
+          color="text-brand-500"
+        />
+        <StatCard 
+          title="Critical Findings" 
+          value={stats.criticalFindings} 
+          icon={Bug} 
+          color="text-red-500"
+          to="/vulnerabilities" 
+        />
+        <StatCard 
+          title="Intrusion Alerts" 
+          value={stats.totalAlerts} 
+          icon={Activity} 
+          color="text-orange-500"
+          to="/intrusion-detection" 
+        />
+      </div>
 
-      {/* 2. KPI Cards */}
-      <section
-        className="stats-grid"
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-          gap: '18px',
-          marginBottom: '24px',
-        }}
-      >
-        <div className="stat-card" style={{ borderTop: '3px solid #09090b' }}>
-          <p>Total Scans</p>
-          <h2>{scans.length}</h2>
-          <span>Recorded in database</span>
-        </div>
-        <div className="stat-card" style={{ borderTop: '3px solid #3f3f46' }}>
-          <p>Total Vulnerabilities</p>
-          <h2>{findings.length}</h2>
-          <span>Classified findings</span>
-        </div>
-        <div className="stat-card" style={{ borderTop: '3px solid #dc2626' }}>
-          <p>Critical & High Risk</p>
-          <h2 style={{ color: '#dc2626' }}>{criticalCount + highCount}</h2>
-          <span>Priority remediation</span>
-        </div>
-        <div className="stat-card" style={{ borderTop: '3px solid #16a34a' }}>
-          <p>Completed Scans</p>
-          <h2 style={{ color: '#16a34a' }}>
-            {scans.filter((s) => (s.status || '').toLowerCase() === 'completed').length}
-          </h2>
-          <span>Ready for reporting</span>
-        </div>
-      </section>
-
-      {/* 3. Charts */}
-      <section style={{ display: 'flex', flexWrap: 'wrap', gap: '20px', marginBottom: '24px' }}>
-        {/* Vulnerability Severity Chart */}
-        <div className="dashboard-card" style={{ flex: '1 1 340px', minWidth: 0 }}>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        
+        {/* Vulnerability Breakdown Chart */}
+        <div className="card lg:col-span-1">
           <div className="card-header">
-            <div>
-              <h3>Vulnerability Severity Distribution</h3>
-              <p>Breakdown of findings from backend database</p>
-            </div>
+            <h3 className="text-base font-semibold leading-6 text-white">Vulnerabilities by Severity</h3>
           </div>
-          {findings.length > 0 ? (
-            <div style={{ height: '260px', width: '100%' }}>
+          <div className="card-body h-80 flex flex-col items-center justify-center">
+            {severityData.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
-                    data={severityChartData}
+                    data={severityData}
                     cx="50%"
                     cy="50%"
-                    innerRadius={55}
-                    outerRadius={85}
-                    paddingAngle={4}
+                    innerRadius={60}
+                    outerRadius={90}
+                    paddingAngle={5}
                     dataKey="value"
                   >
-                    {severityChartData.map((entry, idx) => (
-                      <Cell key={`cell-${idx}`} fill={entry.color} />
+                    {severityData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.color} />
                     ))}
                   </Pie>
-                  <RechartsTooltip />
-                  <Legend verticalAlign="bottom" height={32} />
+                  <RechartsTooltip 
+                    contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', color: '#f8fafc' }}
+                    itemStyle={{ color: '#f8fafc' }}
+                  />
+                  <Legend wrapperStyle={{ fontSize: '12px', color: '#cbd5e1' }} />
                 </PieChart>
               </ResponsiveContainer>
-            </div>
-          ) : (
-            <div style={emptyChartStyle}>
-              No vulnerabilities recorded yet. Run an authorized scan to populate severity metrics.
-            </div>
-          )}
-        </div>
-
-        {/* Scan Status Distribution Chart */}
-        <div className="dashboard-card" style={{ flex: '1 1 400px', minWidth: 0 }}>
-          <div className="card-header">
-            <div>
-              <h3>Scan Execution Overview</h3>
-              <p>Status distribution of recorded security scans</p>
-            </div>
-          </div>
-          {scans.length > 0 ? (
-            <div style={{ height: '260px', width: '100%' }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={scanStatusChartData} margin={{ top: 16, right: 16, left: -16, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e4e4e7" />
-                  <XAxis dataKey="name" tick={{ fontSize: 12, fill: '#52525b' }} />
-                  <YAxis allowDecimals={false} tick={{ fontSize: 12, fill: '#52525b' }} />
-                  <RechartsTooltip />
-                  <Bar dataKey="count" name="Scans" fill="#09090b" radius={[6, 6, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          ) : (
-            <div style={emptyChartStyle}>
-              No scan history found. Click &ldquo;Start New Scan&rdquo; to launch your first assessment.
-            </div>
-          )}
-        </div>
-      </section>
-
-      {/* 4. Recent Scans Table */}
-      <section className="dashboard-card findings-card" style={{ marginBottom: '24px' }}>
-        <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div>
-            <h3>Recent Scan Activity</h3>
-            <p>Latest security assessments executed in your workspace</p>
-          </div>
-          <Link to="/scan-history" style={{ fontSize: '13px', fontWeight: 600, color: '#09090b' }}>
-            View All Scans →
-          </Link>
-        </div>
-
-        {scans.length > 0 ? (
-          <div className="table-placeholder" style={{ overflowX: 'auto' }}>
-            <div style={{ minWidth: '650px' }}>
-              <div className="table-row table-header" style={{ gridTemplateColumns: '1fr 2.5fr 1.5fr 1fr 1.5fr 1fr' }}>
-                <span>Scan ID</span>
-                <span>Target URL</span>
-                <span>Scan Type</span>
-                <span>Status</span>
-                <span>Created</span>
-                <span>Action</span>
+            ) : (
+              <div className="text-center text-slate-500">
+                <ShieldAlert className="mx-auto h-12 w-12 text-slate-600 mb-2" />
+                <p>No vulnerabilities found.</p>
               </div>
-              {scans.slice(0, 5).map((scan) => (
-                <div
-                  className="table-row"
-                  key={scan.id}
-                  style={{ gridTemplateColumns: '1fr 2.5fr 1.5fr 1fr 1.5fr 1fr', alignItems: 'center' }}
-                >
-                  <span style={{ fontFamily: 'monospace', fontSize: '12px', color: '#52525b' }}>
-                    {String(scan.id).slice(0, 8)}
-                  </span>
-                  <span style={{ fontWeight: 600, color: '#09090b', wordBreak: 'break-all' }}>
-                    {scan.target_url || scan.target}
-                  </span>
-                  <span style={{ fontSize: '13px', color: '#3f3f46' }}>
-                    {scan.scan_type || 'Web Application Scan'}
-                  </span>
-                  <span style={{ fontSize: '12px', fontWeight: 600, textTransform: 'capitalize' }}>
-                    {scan.status || 'completed'}
-                  </span>
-                  <span style={{ fontSize: '12px', color: '#71717a' }}>
-                    {scan.created_at ? new Date(scan.created_at).toLocaleDateString() : '—'}
-                  </span>
-                  <span>
-                    <Link
-                      to={`/scan/${scan.id}`}
-                      style={{
-                        padding: '5px 10px',
-                        borderRadius: '6px',
-                        border: '1px solid #d4d4d8',
-                        fontSize: '12px',
-                        fontWeight: 600,
-                        color: '#09090b',
-                        textDecoration: 'none',
-                      }}
-                    >
-                      Details
-                    </Link>
-                  </span>
-                </div>
-              ))}
-            </div>
+            )}
           </div>
-        ) : (
-          <div style={{ padding: '28px', textAlign: 'center', color: '#71717a', fontSize: '14px' }}>
-            No scans recorded yet.{' '}
-            <Link to="/new-scan" style={{ color: '#09090b', fontWeight: 600 }}>
-              Launch your first scan →
-            </Link>
-          </div>
-        )}
-      </section>
-
-      {/* 5. Recent Findings Table */}
-      <section className="dashboard-card findings-card">
-        <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div>
-            <h3>Recent Security Findings</h3>
-            <p>Latest vulnerabilities recorded in PostgreSQL</p>
-          </div>
-          <Link to="/vulnerabilities" style={{ fontSize: '13px', fontWeight: 600, color: '#09090b' }}>
-            View All Findings →
-          </Link>
         </div>
 
-        {findings.length > 0 ? (
-          <div className="table-placeholder" style={{ overflowX: 'auto' }}>
-            <div style={{ minWidth: '650px' }}>
-              <div className="table-row table-header" style={{ gridTemplateColumns: '2fr 1.5fr 1fr 1fr 1.5fr' }}>
-                <span>Vulnerability</span>
-                <span>Category / CWE</span>
-                <span>Severity</span>
-                <span>Status</span>
-                <span>Detected</span>
+        {/* Recent Scans Table */}
+        <div className="card lg:col-span-2 flex flex-col">
+          <div className="card-header flex justify-between items-center">
+            <h3 className="text-base font-semibold leading-6 text-white">Recent Scans</h3>
+            <Link to="/scans" className="text-sm font-medium text-brand-400 hover:text-brand-300">View all</Link>
+          </div>
+          <div className="table-container flex-1">
+            {recentScans.length > 0 ? (
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Target</th>
+                    <th>Status</th>
+                    <th>Date</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recentScans.map((scan) => (
+                    <tr key={scan.id}>
+                      <td className="font-medium text-white">{scan.target_url}</td>
+                      <td>
+                        <span className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset ${
+                          scan.status === 'completed' ? 'bg-green-400/10 text-green-400 ring-green-400/20' :
+                          scan.status === 'failed' ? 'bg-red-400/10 text-red-400 ring-red-400/20' :
+                          'bg-brand-400/10 text-brand-400 ring-brand-400/20'
+                        }`}>
+                          {scan.status}
+                        </span>
+                      </td>
+                      <td className="text-slate-400">
+                        {new Date(scan.created_at).toLocaleDateString()}
+                      </td>
+                      <td>
+                        <Link to={`/scan/${scan.id}`} className="text-brand-400 hover:text-brand-300 font-medium text-sm">
+                          Details
+                        </Link>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <div className="p-8 text-center text-slate-500">
+                <p>No scans performed yet.</p>
+                <Link to="/new-scan" className="mt-4 btn-primary inline-flex">Start a Scan</Link>
               </div>
-              {findings.slice(0, 5).map((f) => (
-                <div
-                  className="table-row"
-                  key={f.id}
-                  style={{ gridTemplateColumns: '2fr 1.5fr 1fr 1fr 1.5fr', alignItems: 'center' }}
-                >
-                  <span style={{ fontWeight: 600, color: '#09090b' }}>{f.title || f.name}</span>
-                  <span style={{ fontSize: '13px', color: '#52525b' }}>
-                    {f.vulnerability_type || 'Web Vulnerability'}
-                    {f.cwe_id ? ` (${f.cwe_id})` : ''}
-                  </span>
-                  <span style={{ fontWeight: 700, textTransform: 'capitalize' }}>{f.severity}</span>
-                  <span style={{ fontSize: '12px', textTransform: 'capitalize' }}>{f.status || 'open'}</span>
-                  <span style={{ fontSize: '12px', color: '#71717a' }}>
-                    {f.detected_at ? new Date(f.detected_at).toLocaleDateString() : '—'}
-                  </span>
-                </div>
-              ))}
-            </div>
+            )}
           </div>
-        ) : (
-          <div style={{ padding: '28px', textAlign: 'center', color: '#71717a', fontSize: '14px' }}>
-            No vulnerability findings in the database yet.
-          </div>
-        )}
-      </section>
+        </div>
+      </div>
     </div>
   );
-};
-
-const emptyChartStyle = {
-  height: '220px',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  textAlign: 'center',
-  padding: '20px',
-  color: '#71717a',
-  fontSize: '13.5px',
-  backgroundColor: '#fafafa',
-  borderRadius: '8px',
-  border: '1px dashed #d4d4d8',
-};
-
-export default Dashboard;
+}

@@ -1,186 +1,134 @@
-import React from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState } from 'react';
 import { useAuth } from '../hooks/useAuth';
+import { updateProfile } from '../services/profileService';
+import { User, Mail, Save, Loader2, CheckCircle2, ShieldAlert } from 'lucide-react';
 
-const Profile = () => {
-  const auth = useAuth ? useAuth() : {};
-  const navigate = useNavigate();
-  const user = auth?.user;
+export default function Profile() {
+  const { user, setUser } = useAuth();
+  const [loading, setLoading] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState('');
+  
+  const [formData, setFormData] = useState({
+    fullName: user?.fullName || '',
+    email: user?.email || '',
+  });
 
-  const handleLogout = () => {
-    if (auth?.logout) {
-      auth.logout();
-    }
-    localStorage.removeItem('ai_websectest_token');
-    sessionStorage.removeItem('ai_websectest_token');
-    navigate('/login', { replace: true });
-  };
-
-  const formatDate = (value) => {
-    if (!value) return 'Not recorded';
+  const handleSave = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setSaved(false);
+    setError('');
+    
     try {
-      return new Date(value).toLocaleString();
-    } catch {
-      return String(value);
+      const data = await updateProfile({ fullName: formData.fullName, email: formData.email });
+      setUser(data.profile);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch (err) {
+      setError(err.response?.data?.error || err.message || 'Unable to update profile.');
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
-    <div style={{ maxWidth: '900px' }}>
-      <div className="page-header" style={{ marginBottom: '24px' }}>
-        <div>
-          <p className="page-label">WORKSPACE / ACCOUNT</p>
-          <h1 style={{ margin: '0 0 6px 0' }}>Researcher Profile</h1>
-          <p className="page-description">
-            View your authenticated researcher identity and session security settings.
-          </p>
-        </div>
+    <div className="max-w-4xl mx-auto space-y-6">
+      <div>
+        <h2 className="text-2xl font-bold leading-7 text-white sm:truncate sm:text-3xl sm:tracking-tight flex items-center gap-2">
+          <User className="h-8 w-8 text-brand-500" />
+          My Profile
+        </h2>
+        <p className="mt-1 text-sm text-slate-400">
+          Manage your account information and credentials.
+        </p>
       </div>
 
-      {/* Identity Card */}
-      <section
-        className="dashboard-card"
-        style={{
-          display: 'flex',
-          flexWrap: 'wrap',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: '20px',
-          marginBottom: '24px',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <div
-            style={{
-              width: '56px',
-              height: '56px',
-              borderRadius: '50%',
-              backgroundColor: '#09090b',
-              color: '#ffffff',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '22px',
-              fontWeight: 800,
-              textTransform: 'uppercase',
-            }}
-          >
-            {user?.full_name?.[0] || user?.email?.[0] || 'R'}
-          </div>
-          <div>
-            <span style={{ fontSize: '11px', fontWeight: 700, color: '#71717a', letterSpacing: '0.06em' }}>
-              AUTHENTICATED IDENTITY
-            </span>
-            <h2 style={{ margin: '4px 0 2px 0', fontSize: '20px', color: '#09090b' }}>
-              {user?.full_name || 'Security Researcher'}
-            </h2>
-            <p style={{ margin: 0, fontSize: '14px', color: '#52525b' }}>{user?.email || 'Active Session'}</p>
-          </div>
-        </div>
-
-        <button
-          onClick={handleLogout}
-          style={{
-            padding: '10px 18px',
-            borderRadius: '8px',
-            backgroundColor: '#09090b',
-            color: '#ffffff',
-            border: '1px solid #09090b',
-            fontSize: '13px',
-            fontWeight: 600,
-            cursor: 'pointer',
-          }}
-        >
-          Sign Out →
-        </button>
-      </section>
-
-      {/* Details Grid */}
-      <section
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
-          gap: '20px',
-        }}
-      >
-        <div className="dashboard-card">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        
+        {/* Profile Form */}
+        <div className="card lg:col-span-2">
           <div className="card-header">
-            <div>
-              <h3>Account Details</h3>
-              <p>Retrieved from /api/auth/me</p>
-            </div>
+            <h3 className="text-base font-semibold text-white">Personal Information</h3>
           </div>
+          <form onSubmit={handleSave}>
+            <div className="card-body space-y-6">
+              
+              {error && (
+                <div className="p-3 bg-red-500/10 border-l-2 border-red-500 flex items-center gap-2 text-sm text-red-500 rounded">
+                  <ShieldAlert className="h-4 w-4" />
+                  {error}
+                </div>
+              )}
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', fontSize: '14px' }}>
-            <div style={rowStyle}>
-              <span style={labelStyle}>Full Name</span>
-              <span style={valStyle}>{user?.full_name || '—'}</span>
+              <div>
+                <label htmlFor="fullName" className="label flex items-center gap-2">
+                  <User className="h-4 w-4 text-slate-400" /> Full Name
+                </label>
+                <div className="mt-2">
+                  <input
+                    type="text"
+                    id="fullName"
+                    value={formData.fullName}
+                    onChange={(e) => setFormData({...formData, fullName: e.target.value})}
+                    className="block w-full sm:max-w-md"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label htmlFor="email" className="label flex items-center gap-2">
+                  <Mail className="h-4 w-4 text-slate-400" /> Email Address
+                </label>
+                <div className="mt-2">
+                  <input
+                    type="email"
+                    id="email"
+                    value={formData.email}
+                    onChange={(e) => setFormData({...formData, email: e.target.value})}
+                    className="block w-full sm:max-w-md"
+                    placeholder="you@example.com"
+                  />
+                </div>
+              </div>
+
             </div>
-            <div style={rowStyle}>
-              <span style={labelStyle}>Email Address</span>
-              <span style={valStyle}>{user?.email || '—'}</span>
+            
+            <div className="card-footer flex justify-end gap-4 items-center">
+              {saved && (
+                <span className="text-sm font-medium text-green-400 flex items-center gap-1.5 animate-in fade-in">
+                  <CheckCircle2 className="h-4 w-4" /> Profile updated
+                </span>
+              )}
+              <button type="submit" className="btn-primary" disabled={loading}>
+                {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
+                Save Changes
+              </button>
             </div>
-            <div style={rowStyle}>
-              <span style={labelStyle}>Role</span>
-              <span style={{ ...valStyle, textTransform: 'capitalize' }}>{user?.role || 'researcher'}</span>
-            </div>
-            <div style={rowStyle}>
-              <span style={labelStyle}>Account Created</span>
-              <span style={valStyle}>{formatDate(user?.created_at)}</span>
-            </div>
-            <div style={{ ...rowStyle, borderBottom: 'none' }}>
-              <span style={labelStyle}>Last Login</span>
-              <span style={valStyle}>{formatDate(user?.last_login_at)}</span>
-            </div>
-          </div>
+          </form>
         </div>
 
-        <div className="dashboard-card">
+        {/* Account Status / Role */}
+        <div className="card h-fit">
           <div className="card-header">
-            <div>
-              <h3>Session & Security Notice</h3>
-              <p>Authentication and token policy</p>
+            <h3 className="text-base font-semibold text-white">Account Status</h3>
+          </div>
+          <div className="card-body">
+            <div className="flex items-center gap-4">
+              <div className="h-12 w-12 rounded-full bg-brand-600 flex items-center justify-center text-lg font-bold text-white ring-4 ring-slate-800">
+                {user?.fullName?.charAt(0).toUpperCase() || user?.email?.charAt(0).toUpperCase() || 'U'}
+              </div>
+              <div>
+                <p className="text-sm font-medium text-white">{user?.fullName || user?.email}</p>
+                <p className="text-xs text-slate-400 capitalize flex items-center gap-1 mt-1">
+                  <ShieldAlert className="h-3 w-3 text-brand-500" /> {user?.role || 'Analyst'}
+                </p>
+              </div>
             </div>
           </div>
-          <p style={{ fontSize: '14px', lineHeight: 1.65, color: '#52525b', margin: '0 0 14px 0' }}>
-            Your workspace is protected using JWT bearer authentication. Access tokens are automatically
-            attached by the Axios request interceptor and cleared immediately if the backend returns an
-            expired or unauthorized (401) response.
-          </p>
-          <div
-            style={{
-              padding: '12px 14px',
-              borderRadius: '8px',
-              backgroundColor: '#fafafa',
-              border: '1px solid #e4e4e7',
-              fontSize: '13px',
-              color: '#3f3f46',
-            }}
-          >
-            <strong>Note:</strong> Password hashes and backend cryptographic secrets are never transmitted
-            to the browser client.
-          </div>
         </div>
-      </section>
+
+      </div>
     </div>
   );
-};
-
-const rowStyle = {
-  display: 'flex',
-  justifyContent: 'space-between',
-  paddingBottom: '10px',
-  borderBottom: '1px solid #f4f4f5',
-};
-
-const labelStyle = {
-  color: '#71717a',
-  fontWeight: 500,
-};
-
-const valStyle = {
-  color: '#09090b',
-  fontWeight: 600,
-};
-
-export default Profile;
+}

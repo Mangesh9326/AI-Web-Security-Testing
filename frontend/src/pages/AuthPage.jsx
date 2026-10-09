@@ -1,507 +1,230 @@
 import React, { useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
-import api, { apiError } from '../services/api';
+import { useAuth } from '../hooks/useAuth';
+import { ShieldAlert, AlertCircle, Loader2 } from 'lucide-react';
+import { register as registerRequest } from '../services/authService';
 
-// Helper to check if user is already logged in
-const isAuthenticated = () => {
-  return Boolean(
-    localStorage.getItem('ai_websectest_token') ||
-    sessionStorage.getItem('ai_websectest_token')
-  );
-};
+export function Login() {
+  const { user, login } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [formData, setFormData] = useState({ email: '', password: '' });
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(false);
 
-function AuthLayout({ children, title, subtitle }) {
+  if (user) {
+    const from = location.state?.from?.pathname || '/dashboard';
+    return <Navigate to={from} replace />;
+  }
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+    
+    try {
+      await login({ email: formData.email, password: formData.password });
+      const from = location.state?.from?.pathname || '/dashboard';
+      navigate(from, { replace: true });
+    } catch (err) {
+      setError(err.response?.data?.error || err.response?.data?.detail || err.message || 'Login failed. Please check your credentials.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
-    <div
-      style={{
-        minHeight: '100vh',
-        backgroundColor: '#f9fafb',
-        color: '#111827',
-        display: 'flex',
-        flexDirection: 'column',
-        fontFamily: 'Inter, system-ui, -apple-system, sans-serif',
-      }}
-    >
-      {/* Top Navigation Bar */}
-      <div
-        style={{
-          maxWidth: '1200px',
-          width: '100%',
-          margin: '0 auto',
-          padding: '20px 24px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          boxSizing: 'border-box',
-        }}
-      >
-        <Link
-          to="/"
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '10px',
-            textDecoration: 'none',
-            color: '#111827',
-            fontWeight: 800,
-            fontSize: '18px',
-          }}
-        >
-          <span>🛡️</span>
-          <span>AI-WebSecTest</span>
+    <div className="min-h-screen bg-slate-950 flex flex-col justify-center py-12 sm:px-6 lg:px-8">
+      <div className="sm:mx-auto sm:w-full sm:max-w-md text-center">
+        <Link to="/" className="inline-flex items-center gap-2 text-3xl font-bold text-white tracking-tight">
+          <ShieldAlert className="h-10 w-10 text-brand-500" />
+          AI-WebSec
         </Link>
-        <Link
-          to="/"
-          style={{
-            fontSize: '14px',
-            fontWeight: 600,
-            color: '#4b5563',
-            textDecoration: 'none',
-          }}
-        >
-          ← Back to Landing Page
-        </Link>
+        <h2 className="mt-6 text-center text-2xl font-bold leading-9 tracking-tight text-white">
+          Sign in to your account
+        </h2>
       </div>
 
-      {/* Centered Form Card */}
-      <div
-        style={{
-          flex: 1,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          padding: '24px',
-        }}
-      >
-        <div
-          style={{
-            width: '100%',
-            maxWidth: '440px',
-            backgroundColor: '#ffffff',
-            border: '1px solid #e5e7eb',
-            borderRadius: '14px',
-            padding: '36px 32px',
-            boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.06)',
-          }}
-        >
-          <p
-            style={{
-              fontSize: '11px',
-              fontWeight: 700,
-              letterSpacing: '0.08em',
-              color: '#6b7280',
-              margin: '0 0 6px 0',
-              textTransform: 'uppercase',
-            }}
-          >
-            Security Workspace Access
+      <div className="mt-10 sm:mx-auto sm:w-full sm:max-w-[480px]">
+        <div className="bg-slate-900 px-6 py-12 shadow sm:rounded-lg sm:px-12 border border-slate-800">
+          <form className="space-y-6" onSubmit={handleSubmit}>
+            {error && (
+              <div className="bg-red-500/10 border border-red-500/50 p-4 rounded-md flex items-start gap-3">
+                <AlertCircle className="h-5 w-5 text-red-500 flex-shrink-0 mt-0.5" />
+                <p className="text-sm text-red-500">{error}</p>
+              </div>
+            )}
+            
+            <div>
+              <label className="block text-sm font-medium leading-6 text-slate-200">
+                Email address
+              </label>
+              <div className="mt-2">
+                <input
+                  type="email"
+                  required
+                  value={formData.email}
+                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                  className="block w-full rounded-md border-0 bg-slate-800 py-1.5 text-white shadow-sm ring-1 ring-inset ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-brand-500 sm:text-sm sm:leading-6 px-3"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium leading-6 text-slate-200">
+                Password
+              </label>
+              <div className="mt-2">
+                <input
+                  type="password"
+                  required
+                  value={formData.password}
+                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                  className="block w-full rounded-md border-0 bg-slate-800 py-1.5 text-white shadow-sm ring-1 ring-inset ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-brand-500 sm:text-sm sm:leading-6 px-3"
+                />
+              </div>
+            </div>
+
+            <div>
+              <button
+                type="submit"
+                disabled={loading}
+                className="flex w-full justify-center rounded-md bg-brand-600 px-3 py-1.5 text-sm font-semibold leading-6 text-white shadow-sm hover:bg-brand-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600 disabled:opacity-50 transition-colors"
+              >
+                {loading ? <Loader2 className="animate-spin h-5 w-5" /> : 'Sign in'}
+              </button>
+            </div>
+          </form>
+
+          <p className="mt-10 text-center text-sm text-slate-400">
+            Don't have an account?{' '}
+            <Link to="/register" className="font-semibold leading-6 text-brand-400 hover:text-brand-300">
+              Create an account
+            </Link>
           </p>
-          <h1 style={{ fontSize: '26px', fontWeight: 800, margin: '0 0 6px 0', color: '#111827' }}>
-            {title}
-          </h1>
-          <p style={{ fontSize: '14px', color: '#6b7280', margin: '0 0 24px 0' }}>{subtitle}</p>
-          {children}
         </div>
       </div>
     </div>
   );
 }
 
-export function Login() {
-  const location = useLocation();
+export function Register() {
+  const { user, login } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const [formData, setFormData] = useState({ fullName: '', email: '', password: '' });
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(false);
 
-  const [form, setForm] = useState({ email: '', password: '' });
-  const [showPassword, setShowPassword] = useState(false);
-  const [showForgot, setShowForgot] = useState(false);
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
-
-  const justRegistered = location.state?.registered;
-
-  if (isAuthenticated()) {
-    return <Navigate to="/dashboard" replace />;
+  if (user) {
+    const from = location.state?.from?.pathname || '/dashboard';
+    return <Navigate to={from} replace />;
   }
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setError('');
-    setBusy(true);
-
+    setError(null);
+    setLoading(true);
+    
     try {
-      const emailClean = form.email.trim();
-      let res;
-
-      // Try standard JSON login first; fallback to OAuth2 form-urlencoded if FastAPI expects username/password form data
-      try {
-        res = await api.post('/auth/login', {
-          email: emailClean,
-          password: form.password,
-        });
-      } catch (firstErr) {
-        if (firstErr.response && firstErr.response.status === 422) {
-          const formData = new URLSearchParams();
-          formData.append('username', emailClean);
-          formData.append('password', form.password);
-          res = await api.post('/auth/login', formData, {
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          });
-        } else {
-          throw firstErr;
-        }
-      }
-
-      const data = res.data || {};
-      const token = data.access_token || data.token || 'authenticated_session';
-
-      // Save token to both storages so no component ever loses session
-      localStorage.setItem('ai_websectest_token', token);
-      sessionStorage.setItem('ai_websectest_token', token);
-
-      // Fetch or store user profile for Navbar & Settings
-      if (data.user) {
-        localStorage.setItem('ai_websectest_user', JSON.stringify(data.user));
-      } else {
-        try {
-          const meRes = await api.get('/auth/me');
-          localStorage.setItem('ai_websectest_user', JSON.stringify(meRes.data));
-        } catch {
-          localStorage.setItem(
-            'ai_websectest_user',
-            JSON.stringify({
-              full_name: emailClean.split('@')[0],
-              email: emailClean,
-            })
-          );
-        }
-      }
-
-      // Navigate directly to the Dashboard
+      await registerRequest({ email: formData.email, password: formData.password, fullName: formData.fullName });
+      await login({ email: formData.email, password: formData.password });
       navigate('/dashboard', { replace: true });
     } catch (err) {
-      setError(apiError(err, 'Invalid email or password. Please check your credentials.'));
+      setError(err.response?.data?.error || err.response?.data?.detail || err.message || 'Registration failed.');
     } finally {
-      setBusy(false);
+      setLoading(false);
     }
   };
 
   return (
-    <AuthLayout title="Welcome back" subtitle="Sign in to access your security dashboard.">
-      {justRegistered && (
-        <div style={successBannerStyle}>
-          ✓ Account created! Please sign in with your new email and password.
-        </div>
-      )}
-
-      {error && <div style={errorBannerStyle}>⚠ {error}</div>}
-
-      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-        <div>
-          <label style={labelStyle}>Email Address</label>
-          <input
-            type="email"
-            value={form.email}
-            onChange={(e) => setForm({ ...form, email: e.target.value })}
-            required
-            placeholder="you@university.edu"
-            style={inputStyle}
-          />
-        </div>
-
-        <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-            <label style={{ ...labelStyle, marginBottom: 0 }}>Password</label>
-            <button
-              type="button"
-              onClick={() => setShowPassword(!showPassword)}
-              style={linkButtonStyle}
-            >
-              {showPassword ? 'Hide' : 'Show'}
-            </button>
-          </div>
-          <input
-            type={showPassword ? 'text' : 'password'}
-            value={form.password}
-            onChange={(e) => setForm({ ...form, password: e.target.value })}
-            required
-            placeholder="••••••••••••"
-            style={inputStyle}
-          />
-        </div>
-
-        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-          <button
-            type="button"
-            onClick={() => setShowForgot(!showForgot)}
-            style={linkButtonStyle}
-          >
-            Forgot password?
-          </button>
-        </div>
-
-        {showForgot && (
-          <div
-            style={{
-              padding: '12px',
-              borderRadius: '8px',
-              backgroundColor: '#f3f4f6',
-              border: '1px solid #e5e7eb',
-              fontSize: '12.5px',
-              color: '#374151',
-              lineHeight: 1.5,
-            }}
-          >
-            <strong>Password Reset:</strong> Because this is a local M.Sc. research server without an external SMTP email server configured, you can either register a new researcher account on the{' '}
-            <Link to="/signup" style={{ color: '#111827', fontWeight: 700 }}>
-              Sign Up page
-            </Link>{' '}
-            or update your password inside <strong>Settings → Change Password</strong> once logged in.
-          </div>
-        )}
-
-        <button type="submit" disabled={busy} style={primaryButtonStyle}>
-          {busy ? 'Signing in...' : 'Login to Dashboard →'}
-        </button>
-      </form>
-
-      <p style={switchTextStyle}>
-        Don&apos;t have an account?{' '}
-        <Link to="/signup" style={{ color: '#111827', fontWeight: 700 }}>
-          Sign Up
+    <div className="min-h-screen bg-slate-950 flex flex-col justify-center py-12 sm:px-6 lg:px-8">
+      <div className="sm:mx-auto sm:w-full sm:max-w-md text-center">
+        <Link to="/" className="inline-flex items-center gap-2 text-3xl font-bold text-white tracking-tight">
+          <ShieldAlert className="h-10 w-10 text-brand-500" />
+          AI-WebSec
         </Link>
-      </p>
-    </AuthLayout>
+        <h2 className="mt-6 text-center text-2xl font-bold leading-9 tracking-tight text-white">
+          Create a new account
+        </h2>
+      </div>
+
+      <div className="mt-10 sm:mx-auto sm:w-full sm:max-w-[480px]">
+        <div className="bg-slate-900 px-6 py-12 shadow sm:rounded-lg sm:px-12 border border-slate-800">
+          <form className="space-y-6" onSubmit={handleSubmit}>
+            {error && (
+              <div className="bg-red-500/10 border border-red-500/50 p-4 rounded-md flex items-start gap-3">
+                <AlertCircle className="h-5 w-5 text-red-500 flex-shrink-0 mt-0.5" />
+                <p className="text-sm text-red-500">{error}</p>
+              </div>
+            )}
+            
+            <div>
+              <label className="block text-sm font-medium leading-6 text-slate-200">
+                Full Name
+              </label>
+              <div className="mt-2">
+                <input
+                  type="text"
+                  required
+                  value={formData.fullName}
+                  onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
+                  className="block w-full rounded-md border-0 bg-slate-800 py-1.5 text-white shadow-sm ring-1 ring-inset ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-brand-500 sm:text-sm sm:leading-6 px-3"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium leading-6 text-slate-200">
+                Email address
+              </label>
+              <div className="mt-2">
+                <input
+                  type="email"
+                  required
+                  value={formData.email}
+                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                  className="block w-full rounded-md border-0 bg-slate-800 py-1.5 text-white shadow-sm ring-1 ring-inset ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-brand-500 sm:text-sm sm:leading-6 px-3"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium leading-6 text-slate-200">
+                Password
+              </label>
+              <div className="mt-2">
+                <input
+                  type="password"
+                  required
+                  value={formData.password}
+                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                  className="block w-full rounded-md border-0 bg-slate-800 py-1.5 text-white shadow-sm ring-1 ring-inset ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-brand-500 sm:text-sm sm:leading-6 px-3"
+                />
+              </div>
+            </div>
+
+            <div>
+              <button
+                type="submit"
+                disabled={loading}
+                className="flex w-full justify-center rounded-md bg-brand-600 px-3 py-1.5 text-sm font-semibold leading-6 text-white shadow-sm hover:bg-brand-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600 disabled:opacity-50 transition-colors"
+              >
+                {loading ? <Loader2 className="animate-spin h-5 w-5" /> : 'Create Account'}
+              </button>
+            </div>
+          </form>
+
+          <p className="mt-10 text-center text-sm text-slate-400">
+            Already have an account?{' '}
+            <Link to="/login" className="font-semibold leading-6 text-brand-400 hover:text-brand-300">
+              Sign in
+            </Link>
+          </p>
+        </div>
+      </div>
+    </div>
   );
 }
-
-export function Register() {
-  const navigate = useNavigate();
-  const [form, setForm] = useState({
-    full_name: '',
-    email: '',
-    password: '',
-    confirm: '',
-  });
-  const [showPassword, setShowPassword] = useState(false);
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
-
-  if (isAuthenticated()) {
-    return <Navigate to="/dashboard" replace />;
-  }
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setError('');
-
-    if (!form.full_name.trim()) {
-      return setError('Please enter your full name.');
-    }
-    if (form.password.length < 12) {
-      return setError('Password must be at least 12 characters long.');
-    }
-    if (form.password !== form.confirm) {
-      return setError('Passwords do not match.');
-    }
-
-    setBusy(true);
-    try {
-      const emailClean = form.email.trim();
-      const nameClean = form.full_name.trim();
-
-      // 1. Register the user in FastAPI
-      const regRes = await api.post('/auth/register', {
-        full_name: nameClean,
-        email: emailClean,
-        password: form.password,
-      });
-
-      // 2. If register returned a token, or if we can auto-login immediately, go straight to /dashboard!
-      let token = regRes.data?.access_token || regRes.data?.token;
-
-      if (!token) {
-        try {
-          const loginRes = await api.post('/auth/login', {
-            email: emailClean,
-            password: form.password,
-          });
-          token = loginRes.data?.access_token || loginRes.data?.token;
-        } catch {
-          // If auto-login isn't supported, redirect cleanly to /login
-        }
-      }
-
-      if (token) {
-        localStorage.setItem('ai_websectest_token', token);
-        sessionStorage.setItem('ai_websectest_token', token);
-        localStorage.setItem(
-          'ai_websectest_user',
-          JSON.stringify({
-            full_name: nameClean,
-            email: emailClean,
-            created_at: new Date().toISOString(),
-          })
-        );
-        navigate('/dashboard', { replace: true });
-      } else {
-        navigate('/login', { state: { registered: true }, replace: true });
-      }
-    } catch (err) {
-      setError(apiError(err, 'Could not create account. Check if the backend is running.'));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <AuthLayout title="Create your account" subtitle="Register to access your security workspace.">
-      {error && <div style={errorBannerStyle}>⚠ {error}</div>}
-
-      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
-        <div>
-          <label style={labelStyle}>Full Name</label>
-          <input
-            type="text"
-            value={form.full_name}
-            onChange={(e) => setForm({ ...form, full_name: e.target.value })}
-            required
-            placeholder="Your Full Name"
-            style={inputStyle}
-          />
-        </div>
-
-        <div>
-          <label style={labelStyle}>Email Address</label>
-          <input
-            type="email"
-            value={form.email}
-            onChange={(e) => setForm({ ...form, email: e.target.value })}
-            required
-            placeholder="you@university.edu"
-            style={inputStyle}
-          />
-        </div>
-
-        <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-            <label style={{ ...labelStyle, marginBottom: 0 }}>
-              Password <span style={{ fontWeight: 400, color: '#6b7280' }}>(min 12 chars)</span>
-            </label>
-            <button
-              type="button"
-              onClick={() => setShowPassword(!showPassword)}
-              style={linkButtonStyle}
-            >
-              {showPassword ? 'Hide' : 'Show'}
-            </button>
-          </div>
-          <input
-            type={showPassword ? 'text' : 'password'}
-            value={form.password}
-            onChange={(e) => setForm({ ...form, password: e.target.value })}
-            required
-            minLength={12}
-            placeholder="Create a strong password (12+ chars)"
-            style={inputStyle}
-          />
-        </div>
-
-        <div>
-          <label style={labelStyle}>Confirm Password</label>
-          <input
-            type={showPassword ? 'text' : 'password'}
-            value={form.confirm}
-            onChange={(e) => setForm({ ...form, confirm: e.target.value })}
-            required
-            minLength={12}
-            placeholder="Repeat your password"
-            style={inputStyle}
-          />
-        </div>
-
-        <button type="submit" disabled={busy} style={primaryButtonStyle}>
-          {busy ? 'Creating Account...' : 'Sign Up & Open Dashboard →'}
-        </button>
-      </form>
-
-      <p style={switchTextStyle}>
-        Already registered?{' '}
-        <Link to="/login" style={{ color: '#111827', fontWeight: 700 }}>
-          Sign In
-        </Link>
-      </p>
-    </AuthLayout>
-  );
-}
-
-const labelStyle = {
-  display: 'block',
-  fontSize: '13px',
-  fontWeight: 600,
-  color: '#111827',
-  marginBottom: '6px',
-};
-
-const inputStyle = {
-  width: '100%',
-  padding: '11px 14px',
-  fontSize: '14px',
-  borderRadius: '8px',
-  border: '1px solid #d1d5db',
-  outline: 'none',
-  boxSizing: 'border-box',
-};
-
-const primaryButtonStyle = {
-  width: '100%',
-  padding: '12px 16px',
-  borderRadius: '8px',
-  backgroundColor: '#111827',
-  color: '#ffffff',
-  border: 'none',
-  fontSize: '14px',
-  fontWeight: 700,
-  cursor: 'pointer',
-  marginTop: '4px',
-};
-
-const linkButtonStyle = {
-  background: 'none',
-  border: 'none',
-  padding: 0,
-  fontSize: '12px',
-  fontWeight: 600,
-  color: '#4b5563',
-  cursor: 'pointer',
-};
-
-const errorBannerStyle = {
-  padding: '12px 14px',
-  borderRadius: '8px',
-  backgroundColor: '#fef2f2',
-  border: '1px solid #fecaca',
-  color: '#991b1b',
-  fontSize: '13px',
-  marginBottom: '16px',
-};
-
-const successBannerStyle = {
-  padding: '12px 14px',
-  borderRadius: '8px',
-  backgroundColor: '#f0fdf4',
-  border: '1px solid #bbf7d0',
-  color: '#166534',
-  fontSize: '13px',
-  marginBottom: '16px',
-};
-
-const switchTextStyle = {
-  marginTop: '22px',
-  paddingTop: '18px',
-  borderTop: '1px solid #f3f4f6',
-  textAlign: 'center',
-  fontSize: '13.5px',
-  color: '#4b5563',
-};
 
 export default Login;

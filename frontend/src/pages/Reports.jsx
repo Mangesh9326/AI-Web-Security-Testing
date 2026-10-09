@@ -1,301 +1,140 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
-import {
-  PieChart, Pie, Cell, Tooltip as RechartsTooltip, ResponsiveContainer, Legend
-} from 'recharts';
-import api, { apiError } from '../services/api';
+import React, { useEffect, useState } from 'react';
+import { getScans } from '../services/scanService';
+import { FileText, Download, RefreshCw, AlertCircle, Calendar } from 'lucide-react';
+import { Link } from 'react-router-dom';
 
-const Reports = () => {
-  const navigate = useNavigate();
+export default function Reports() {
   const [scans, setScans] = useState([]);
-  const [findings, setFindings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  const loadReportData = useCallback(async () => {
+  const load = () => {
     setLoading(true);
     setError('');
-    try {
-      const [scansRes, findingsRes] = await Promise.allSettled([
-        api.get('/scans'),
-        api.get('/findings'),
-      ]);
-      if (scansRes.status === 'fulfilled') {
-        setScans(Array.isArray(scansRes.value.data) ? scansRes.value.data : scansRes.value.data?.items || []);
-      }
-      if (findingsRes.status === 'fulfilled') {
-        setFindings(Array.isArray(findingsRes.value.data) ? findingsRes.value.data : findingsRes.value.data?.items || []);
-      }
-    } catch (err) {
-      setError(apiError(err, 'Unable to load report data.'));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+    getScans()
+      .then((res) => {
+        const data = res.scans || res.data || res;
+        const scansArray = Array.isArray(data) ? data : [];
+        const finishedScans = scansArray.filter(s => s.status === 'completed' || s.status === 'failed');
+        setScans(finishedScans);
+      })
+      .catch((e) => setError(e.response?.data?.error || e.message || 'Unable to load scans for reporting.'))
+      .finally(() => setLoading(false));
+  };
 
   useEffect(() => {
-    loadReportData();
-  }, [loadReportData]);
+    load();
+  }, []);
 
-  const countSev = (s) => findings.filter((f) => (f.severity || '').toLowerCase() === s).length;
-
-  const severityData = [
-    { name: 'Critical', value: countSev('critical'), color: '#dc2626', action: 'Immediate Remediation' },
-    { name: 'High', value: countSev('high'), color: '#ea580c', action: 'High Priority' },
-    { name: 'Medium', value: countSev('medium'), color: '#eab308', action: 'Scheduled Review' },
-    { name: 'Low', value: countSev('low'), color: '#16a34a', action: 'Best Practice Hardening' },
-  ];
-
-  // Export findings & scan summary to CSV
-  const handleExportCSV = () => {
-    const headers = ['ID', 'Title', 'Category', 'Severity', 'CVSS', 'Status', 'Detected_At'];
-    const rows = findings.map((f) => [
-      f.id,
-      `"${(f.title || f.name || '').replace(/"/g, '""')}"`,
-      `"${(f.vulnerability_type || '').replace(/"/g, '""')}"`,
-      f.severity || '',
-      f.cvss_score ?? '',
-      f.status || 'open',
-      f.detected_at || '',
-    ]);
-    const csvContent = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', `ai-websectest-report-${new Date().toISOString().slice(0, 10)}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  const handleDownload = (scanId) => {
+    // Placeholder for PDF generation/download logic
+    alert(`Report generation for scan #${scanId} is not yet implemented in the backend.`);
   };
 
   return (
-    <div style={{ maxWidth: '100%', overflowX: 'hidden' }}>
-      {/* Header */}
-      <div
-        className="page-header"
-        style={{
-          marginBottom: '24px',
-          display: 'flex',
-          flexWrap: 'wrap',
-          gap: '16px',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-        }}
-      >
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <p className="page-label">SECURITY / REPORTS</p>
-          <h1 style={{ margin: '0 0 6px 0' }}>Security Assessment Reports</h1>
-          <p className="page-description">
-            Consolidated risk summaries, scan statistics, and exportable vulnerability reports.
+          <h2 className="text-2xl font-bold leading-7 text-white sm:truncate sm:text-3xl sm:tracking-tight flex items-center gap-2">
+            <FileText className="h-8 w-8 text-brand-500" />
+            Security Reports
+          </h2>
+          <p className="mt-1 text-sm text-slate-400">
+            Generate and download executive and technical security reports for completed scans.
           </p>
         </div>
-
-        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-          <button
-            onClick={() => navigate('/scan-history')}
-            style={secondaryBtnStyle}
-          >
-            Scan History
-          </button>
-          <button
-            onClick={handleExportCSV}
-            disabled={findings.length === 0}
-            style={secondaryBtnStyle}
-          >
-            ↓ Export CSV
-          </button>
-          <button
-            onClick={() => window.print()}
-            style={primaryBtnStyle}
-          >
-            🖨 Print / Save PDF
+        <div className="flex items-center gap-3">
+          <button onClick={load} className="btn-secondary" title="Refresh">
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
           </button>
         </div>
       </div>
 
-      {error && (
-        <div style={{ padding: '12px 16px', backgroundColor: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b', borderRadius: '8px', marginBottom: '20px', fontSize: '14px' }}>
-          ⚠ {error}
+      <div className="card">
+        <div className="card-header">
+           <h3 className="text-base font-semibold text-white">Available Reports</h3>
         </div>
-      )}
+        
+        <div className="table-container">
+          {error && (
+            <div className="p-4 bg-red-500/10 border-b border-red-500/50 flex items-center gap-3">
+              <AlertCircle className="h-5 w-5 text-red-500" />
+              <p className="text-sm text-red-500">{error}</p>
+            </div>
+          )}
 
-      {/* KPI Row */}
-      <section
-        className="stats-grid"
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
-          gap: '16px',
-          marginBottom: '24px',
-        }}
-      >
-        <div className="stat-card" style={{ borderTop: '3px solid #09090b' }}>
-          <p>Total Scans</p>
-          <h2>{scans.length}</h2>
-        </div>
-        <div className="stat-card" style={{ borderTop: '3px solid #3f3f46' }}>
-          <p>Total Findings</p>
-          <h2>{findings.length}</h2>
-        </div>
-        <div className="stat-card" style={{ borderTop: '3px solid #dc2626' }}>
-          <p>Critical</p>
-          <h2 style={{ color: '#dc2626' }}>{severityData[0].value}</h2>
-        </div>
-        <div className="stat-card" style={{ borderTop: '3px solid #ea580c' }}>
-          <p>High</p>
-          <h2 style={{ color: '#ea580c' }}>{severityData[1].value}</h2>
-        </div>
-        <div className="stat-card" style={{ borderTop: '3px solid #eab308' }}>
-          <p>Medium & Low</p>
-          <h2>{severityData[2].value + severityData[3].value}</h2>
-        </div>
-      </section>
-
-      {/* Middle Grid */}
-      <section style={{ display: 'flex', flexWrap: 'wrap', gap: '20px', marginBottom: '24px' }}>
-        <div className="dashboard-card" style={{ flex: '1 1 360px', minWidth: 0 }}>
-          <div className="card-header">
-            <div>
-              <h3>Risk Prioritization Summary</h3>
-              <p>Counts by severity level</p>
+          {loading && scans.length === 0 ? (
+            <div className="p-12 text-center text-slate-400">
+              <RefreshCw className="h-8 w-8 animate-spin mx-auto text-brand-500 mb-3" />
+              <p>Loading available reports...</p>
             </div>
-          </div>
-          <div style={{ width: '100%', overflowX: 'auto' }}>
-            <div className="table-row table-header" style={{ gridTemplateColumns: '1fr 1fr 2fr', padding: '10px', backgroundColor: '#fafafa' }}>
-              <span>Severity</span>
-              <span>Count</span>
-              <span>Recommended Action</span>
-            </div>
-            {severityData.map((item, idx) => (
-              <div className="table-row" key={idx} style={{ gridTemplateColumns: '1fr 1fr 2fr', padding: '10px' }}>
-                <span style={{ fontWeight: 700, color: item.color }}>{item.name}</span>
-                <span style={{ fontWeight: 600 }}>{item.value}</span>
-                <span style={{ color: '#52525b', fontSize: '13px' }}>{item.action}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="dashboard-card" style={{ flex: '1 1 320px', minWidth: 0 }}>
-          <div className="card-header">
-            <div>
-              <h3>Severity Distribution</h3>
-              <p>Visual proportion of recorded findings</p>
-            </div>
-          </div>
-          {findings.length > 0 ? (
-            <div style={{ height: '250px', width: '100%' }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie data={severityData} cx="50%" cy="50%" innerRadius={55} outerRadius={85} paddingAngle={4} dataKey="value">
-                    {severityData.map((entry, idx) => (
-                      <Cell key={`cell-${idx}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <RechartsTooltip />
-                  <Legend verticalAlign="bottom" height={32} />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
+          ) : scans.length > 0 ? (
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Report Target</th>
+                  <th>Scan Date</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {scans.map((scan) => (
+                  <tr key={scan.id}>
+                    <td className="font-medium text-white max-w-xs truncate" title={scan.target_url}>
+                      {scan.target_url}
+                      <div className="text-xs text-slate-500 font-mono mt-1">Scan ID: {scan.id}</div>
+                    </td>
+                    <td className="text-slate-400 whitespace-nowrap">
+                       <div className="flex items-center gap-1.5">
+                         <Calendar className="h-4 w-4 text-slate-500" />
+                         {new Date(scan.created_at).toLocaleDateString()}
+                       </div>
+                    </td>
+                    <td>
+                      <span className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset ${
+                        scan.status === 'completed' ? 'bg-green-400/10 text-green-400 ring-green-400/20' :
+                        'bg-red-400/10 text-red-400 ring-red-400/20'
+                      }`}>
+                        {scan.status}
+                      </span>
+                    </td>
+                    <td>
+                      <div className="flex items-center gap-3">
+                        <Link 
+                          to={`/scan/${scan.id}`} 
+                          className="text-brand-400 hover:text-brand-300 font-medium text-sm"
+                        >
+                          View Online
+                        </Link>
+                        <button 
+                          onClick={() => handleDownload(scan.id)}
+                          className="text-slate-400 hover:text-white font-medium text-sm inline-flex items-center gap-1"
+                        >
+                          <Download className="h-4 w-4" /> PDF
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           ) : (
-            <div style={{ height: '220px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#71717a', fontSize: '13.5px' }}>
-              No findings available to chart.
+            <div className="p-16 text-center">
+              <FileText className="mx-auto h-12 w-12 text-slate-600 mb-4" />
+              <h3 className="mt-2 text-sm font-semibold text-white">No reports available</h3>
+              <p className="mt-1 text-sm text-slate-400">
+                Complete a scan to generate a report.
+              </p>
+              <div className="mt-6">
+                <Link to="/new-scan" className="btn-primary inline-flex items-center">
+                  Start a Scan
+                </Link>
+              </div>
             </div>
           )}
         </div>
-      </section>
-
-      {/* Scan Reports List */}
-      <section className="dashboard-card findings-card">
-        <div className="card-header">
-          <div>
-            <h3>Scan Assessment Reports ({scans.length})</h3>
-            <p>Select any scan below to view its full assessment report.</p>
-          </div>
-        </div>
-
-        {loading ? (
-          <div style={{ padding: '32px', textAlign: 'center', color: '#52525b' }}>Loading reports...</div>
-        ) : scans.length > 0 ? (
-          <div className="table-placeholder" style={{ overflowX: 'auto' }}>
-            <div style={{ minWidth: '650px' }}>
-              <div className="table-row table-header" style={{ gridTemplateColumns: '1fr 2.5fr 1.5fr 1fr 1.5fr 1fr' }}>
-                <span>Report ID</span>
-                <span>Target URL</span>
-                <span>Scan Type</span>
-                <span>Status</span>
-                <span>Scan Date</span>
-                <span>Action</span>
-              </div>
-              {scans.map((scan) => (
-                <div className="table-row" key={scan.id} style={{ gridTemplateColumns: '1fr 2.5fr 1.5fr 1fr 1.5fr 1fr', alignItems: 'center' }}>
-                  <span style={{ fontFamily: 'monospace', fontSize: '12px', color: '#52525b' }}>
-                    {String(scan.id).slice(0, 8)}
-                  </span>
-                  <span style={{ fontWeight: 600, color: '#09090b', wordBreak: 'break-all' }}>
-                    {scan.target_url || scan.target}
-                  </span>
-                  <span style={{ fontSize: '13px', color: '#3f3f46' }}>
-                    {scan.scan_type || 'Web Application Scan'}
-                  </span>
-                  <span style={{ fontSize: '12px', fontWeight: 600, textTransform: 'capitalize' }}>
-                    {scan.status || 'completed'}
-                  </span>
-                  <span style={{ fontSize: '12px', color: '#71717a' }}>
-                    {scan.created_at ? new Date(scan.created_at).toLocaleDateString() : '—'}
-                  </span>
-                  <span>
-                    <button
-                      onClick={() => navigate(`/scan/${scan.id}`)}
-                      style={{
-                        padding: '6px 12px',
-                        borderRadius: '6px',
-                        backgroundColor: '#09090b',
-                        color: '#ffffff',
-                        border: 'none',
-                        fontSize: '12px',
-                        fontWeight: 600,
-                        cursor: 'pointer',
-                      }}
-                    >
-                      Open Report
-                    </button>
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : (
-          <div style={{ padding: '32px', textAlign: 'center', color: '#71717a', fontSize: '14px' }}>
-            No scan reports available yet. Run a security scan to generate an assessment report.
-          </div>
-        )}
-      </section>
+      </div>
     </div>
   );
-};
-
-const primaryBtnStyle = {
-  padding: '10px 16px',
-  borderRadius: '8px',
-  backgroundColor: '#09090b',
-  color: '#ffffff',
-  border: '1px solid #09090b',
-  fontSize: '13px',
-  fontWeight: 600,
-  cursor: 'pointer',
-};
-
-const secondaryBtnStyle = {
-  padding: '10px 16px',
-  borderRadius: '8px',
-  backgroundColor: '#ffffff',
-  color: '#09090b',
-  border: '1px solid #d4d4d8',
-  fontSize: '13px',
-  fontWeight: 600,
-  cursor: 'pointer',
-};
-
-export default Reports;
+}

@@ -1,13 +1,12 @@
 import React from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
-import Navbar from './components/Navbar';
-import Sidebar from './components/Sidebar';
+import AppShell from './components/AppShell';
 
 // Public Pages
 import LandingPage from './pages/LandingPage';
 import { Login, Register } from './pages/AuthPage';
 
-// Existing Protected Workspace Pages (Preserved Untouched)
+// Protected Workspace Pages
 import Dashboard from './pages/Dashboard';
 import NewScan from './pages/NewScan';
 import ScanDetails from './pages/ScanDetails';
@@ -15,28 +14,18 @@ import Vulnerabilities from './pages/Vulnerabilities';
 import IntrusionDetection from './pages/IntrusionDetection';
 import Reports from './pages/Reports';
 import Settings from './pages/Settings';
+import Profile from './pages/Profile';
 import ApiTest from './pages/ApiTest';
+import Scans from './pages/Scans';
+import Logs from './pages/Logs';
 
-const RequireAuth = ({ children }) => {
-  const location = useLocation();
-  const hasToken = Boolean(
-    localStorage.getItem('ai_websectest_token') ||
-    sessionStorage.getItem('ai_websectest_token')
-  );
-
-  if (!hasToken) {
-    return <Navigate to="/login" state={{ from: location }} replace />;
-  }
-
-  return children;
-};
+import ProtectedRoute from './components/ProtectedRoute';
 
 const App = () => {
   const location = useLocation();
   const publicPaths = ['/', '/login', '/signup', '/register'];
   const isPublicPage = publicPaths.includes(location.pathname);
 
-  // 1. Public Pages (Landing Page, Login, Sign Up)
   if (isPublicPage) {
     return (
       <Routes>
@@ -48,39 +37,26 @@ const App = () => {
     );
   }
 
-  // 2. Protected Workspace Pages (Only visible after Signup / Login)
   return (
-    <RequireAuth>
-      <div className="app" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
-        <Navbar />
-        <div className="app-body" style={{ display: 'flex', flex: 1, minHeight: 'calc(100vh - 64px)' }}>
-          <Sidebar />
-          <main
-            className="main-content"
-            style={{
-              flex: 1,
-              padding: '28px',
-              backgroundColor: '#f8fafc',
-              overflowY: 'auto',
-              scrollBehavior: 'smooth',
-            }}
-          >
-            <Routes>
-              <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/new-scan" element={<NewScan />} />
-              <Route path="/scan/:id" element={<ScanDetails />} />
-              <Route path="/vulnerabilities" element={<Vulnerabilities />} />
-              <Route path="/intrusion-detection" element={<IntrusionDetection />} />
-              <Route path="/reports" element={<Reports />} />
-              <Route path="/settings" element={<Settings />} />
-              <Route path="/profile" element={<Settings />} />
-              <Route path="/api-test" element={<ApiTest />} />
-              <Route path="*" element={<Navigate to="/dashboard" replace />} />
-            </Routes>
-          </main>
-        </div>
-      </div>
-    </RequireAuth>
+    <ProtectedRoute>
+      <AppShell>
+        <Routes>
+          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/new-scan" element={<NewScan />} />
+          <Route path="/scans" element={<Scans />} />
+          <Route path="/scan/:id" element={<ScanDetails />} />
+          <Route path="/vulnerabilities" element={<Vulnerabilities />} />
+          <Route path="/findings" element={<Vulnerabilities />} />
+          <Route path="/intrusion-detection" element={<IntrusionDetection />} />
+          <Route path="/logs" element={<Logs />} />
+          <Route path="/reports" element={<Reports />} />
+          <Route path="/settings" element={<Settings />} />
+          <Route path="/profile" element={<Profile />} />
+          <Route path="/api-test" element={<ApiTest />} />
+          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+        </Routes>
+      </AppShell>
+    </ProtectedRoute>
   );
 };
 

@@ -281,6 +281,46 @@ router.get("/", async (req, res, next) => {
   }
 });
 
+// GET /api/scans/dashboard/metrics
+router.get("/dashboard/metrics", async (req, res, next) => {
+  try {
+    const scanStatsQuery = db.query(
+      `SELECT 
+         COUNT(*)::int as total_scans,
+         COUNT(*) FILTER (WHERE status = 'completed')::int as completed_scans,
+         COUNT(*) FILTER (WHERE status IN ('running', 'in_progress', 'pending', 'queued'))::int as running_scans,
+         COUNT(*) FILTER (WHERE status IN ('failed', 'cancelled'))::int as failed_scans
+       FROM scans 
+       WHERE user_id = $1`,
+      [req.user.id]
+    );
+
+    const findingStatsQuery = db.query(
+      `SELECT 
+         COUNT(*)::int as total_findings,
+         COUNT(*) FILTER (WHERE severity IN ('critical', 'high'))::int as critical_high_findings,
+         COUNT(*) FILTER (WHERE status IN ('open', 'new', 'unresolved'))::int as open_findings,
+         COUNT(*) FILTER (WHERE severity = 'critical')::int as critical_findings,
+         COUNT(*) FILTER (WHERE severity = 'high')::int as high_findings,
+         COUNT(*) FILTER (WHERE severity = 'medium')::int as medium_findings,
+         COUNT(*) FILTER (WHERE severity = 'low')::int as low_findings
+       FROM findings f
+       JOIN scans s ON f.scan_id = s.id
+       WHERE s.user_id = $1`,
+      [req.user.id]
+    );
+
+    const [scanStats, findingStats] = await Promise.all([scanStatsQuery, findingStatsQuery]);
+
+    res.json({
+      scans: scanStats.rows[0],
+      findings: findingStats.rows[0],
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // GET /api/scans/all/findings
 router.get("/all/findings", async (req, res, next) => {
   try {

@@ -23,8 +23,8 @@ export function AuthProvider({ children }) {
 
   const login = async (credentials) => {
     const data = await loginRequest(credentials)
-    sessionStorage.setItem(TOKEN_KEY, data.access_token)
-    localStorage.setItem(TOKEN_KEY, data.access_token)
+    sessionStorage.setItem(TOKEN_KEY, data.token)
+    localStorage.setItem(TOKEN_KEY, data.token)
     setUser(data.user)
     return data.user
   }

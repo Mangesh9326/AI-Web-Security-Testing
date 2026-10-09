@@ -1,404 +1,286 @@
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useState } from 'react';
+import { getAllFindings } from '../services/scanService';
+import { ShieldAlert, Search, RefreshCw, AlertCircle, AlertTriangle, Bug, Info, ArrowUpRight, ChevronDown, ChevronUp, Globe } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { 
-  getAllFindings, updateFindingStatus, getFindingNotes, addFindingNote, getFindingHistory 
-} from '../services/scanService';
-import { apiError } from '../services/api';
 
-const VALID_TRANSITIONS = {
-  open: ["in_progress", "accepted_risk", "false_positive"],
-  in_progress: ["resolved", "accepted_risk", "false_positive", "open"],
-  resolved: ["open", "in_progress"],
-  accepted_risk: ["open"],
-  false_positive: ["open"]
+const SeverityIcon = ({ severity }) => {
+  switch(severity?.toLowerCase()) {
+    case 'critical': return <ShieldAlert className="h-4 w-4 text-red-500" />;
+    case 'high': return <AlertTriangle className="h-4 w-4 text-orange-500" />;
+    case 'medium': return <AlertTriangle className="h-4 w-4 text-yellow-500" />;
+    case 'low': return <Bug className="h-4 w-4 text-blue-500" />;
+    case 'info': return <Info className="h-4 w-4 text-cyan-500" />;
+    default: return <Info className="h-4 w-4 text-slate-500" />;
+  }
 };
 
-const Vulnerabilities = () => {
-  const [findings, setFindings] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState('');
-
-  // Filtering states
-  const [websiteFilter, setWebsiteFilter] = useState('all');
-  const [searchTerm, setSearchTerm] = useState('');
-  const [severityFilter, setSeverityFilter] = useState('all');
-  const [statusFilter, setStatusFilter] = useState('all');
+const SeverityBadge = ({ severity }) => {
+  const styles = {
+    critical: 'bg-red-500/10 text-red-400 ring-red-500/20',
+    high: 'bg-orange-500/10 text-orange-400 ring-orange-500/20',
+    medium: 'bg-yellow-500/10 text-yellow-400 ring-yellow-500/20',
+    low: 'bg-blue-500/10 text-blue-400 ring-blue-500/20',
+    info: 'bg-cyan-500/10 text-cyan-400 ring-cyan-500/20'
+  };
+  const style = styles[severity?.toLowerCase()] || 'bg-slate-500/10 text-slate-400 ring-slate-500/20';
   
-  // Drawer States
-  const [expandedFindingId, setExpandedFindingId] = useState(null);
-  const [drawerTab, setDrawerTab] = useState('evidence'); // 'evidence', 'notes', 'history'
-  const [notes, setNotes] = useState([]);
-  const [history, setHistory] = useState([]);
-  const [newNoteText, setNewNoteText] = useState('');
-  const [submittingNote, setSubmittingNote] = useState(false);
-
-  const loadFindingsData = useCallback(async (isRefresh = false) => {
-    if (isRefresh) setRefreshing(true);
-    else setLoading(true);
-    setError('');
-
-    try {
-      const response = await getAllFindings();
-      const list = response?.findings || (Array.isArray(response) ? response : []);
-      setFindings(list);
-    } catch (err) {
-      setError(apiError(err, 'Unable to retrieve vulnerabilities from the backend.'));
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadFindingsData();
-  }, [loadFindingsData]);
-
-  const uniqueWebsites = useMemo(() => {
-    const urls = findings.map(f => f.target_url).filter(Boolean);
-    return Array.from(new Set(urls)).sort();
-  }, [findings]);
-
-  const filteredFindings = useMemo(() => {
-    return findings.filter((f) => {
-      const query = searchTerm.trim().toLowerCase();
-      const title = (f.title || f.name || '').toLowerCase();
-      const type = (f.vulnerability_type || '').toLowerCase();
-      const target = (f.affected_url || f.target_url || '').toLowerCase();
-
-      const matchesWebsite = websiteFilter === 'all' || f.target_url === websiteFilter;
-      const matchesSearch = !query || title.includes(query) || type.includes(query) || target.includes(query) || String(f.id).includes(query);
-      const matchesSeverity = severityFilter === 'all' || String(f.severity).toLowerCase() === severityFilter;
-      const matchesStatus = statusFilter === 'all' || String(f.status || 'open').toLowerCase() === statusFilter;
-
-      return matchesWebsite && matchesSearch && matchesSeverity && matchesStatus;
-    });
-  }, [findings, websiteFilter, searchTerm, severityFilter, statusFilter]);
-
-  const countSeverity = (sev) => filteredFindings.filter((f) => String(f.severity).toLowerCase() === sev).length;
-
-  const loadFindingDetails = async (findingId) => {
-    if (expandedFindingId === findingId) {
-      setExpandedFindingId(null);
-      return;
-    }
-    setExpandedFindingId(findingId);
-    setDrawerTab('evidence');
-    try {
-      const [notesRes, historyRes] = await Promise.all([
-        getFindingNotes(findingId),
-        getFindingHistory(findingId)
-      ]);
-      setNotes(notesRes?.notes || []);
-      setHistory(historyRes?.history || []);
-    } catch (err) {
-      console.error('Failed to load details:', err);
-    }
-  };
-
-  const handleStatusChange = async (findingId, nextStatus) => {
-    try {
-      await updateFindingStatus(findingId, nextStatus);
-      await loadFindingsData(true);
-      const [notesRes, historyRes] = await Promise.all([
-        getFindingNotes(findingId),
-        getFindingHistory(findingId)
-      ]);
-      setNotes(notesRes?.notes || []);
-      setHistory(historyRes?.history || []);
-    } catch (err) {
-      alert(apiError(err, 'Failed to update finding status.'));
-    }
-  };
-
-  const handleAddNote = async (e, findingId) => {
-    e.preventDefault();
-    if (!newNoteText.trim()) return;
-    setSubmittingNote(true);
-    try {
-      const res = await addFindingNote(findingId, newNoteText.trim());
-      setNotes(prev => [...prev, res.note]);
-      setNewNoteText('');
-      const historyRes = await getFindingHistory(findingId);
-      setHistory(historyRes?.history || []);
-    } catch (err) {
-      alert(apiError(err, 'Failed to post remediation note.'));
-    } finally {
-      setSubmittingNote(false);
-    }
-  };
-
-  const getSeverityBadge = (severity) => {
-    const map = {
-      critical: { bg: '#fef2f2', text: '#dc2626', border: '#fecaca' },
-      high: { bg: '#fff7ed', text: '#ea580c', border: '#fed7aa' },
-      medium: { bg: '#fefce8', text: '#ca8a04', border: '#fef08a' },
-      low: { bg: '#f0fdf4', text: '#16a34a', border: '#bbf7d0' },
-      info: { bg: '#f8fafc', text: '#64748b', border: '#e2e8f0' }
-    };
-    const s = map[severity?.toLowerCase()] || map.info;
-    return (
-      <span style={{ backgroundColor: s.bg, color: s.text, border: `1px solid ${s.border}`, padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase' }}>
-        {severity}
-      </span>
-    );
-  };
-
-  const getStatusBadge = (status) => {
-    const map = {
-      open: { bg: '#fef2f2', text: '#dc2626' },
-      in_progress: { bg: '#eff6ff', text: '#2563eb' },
-      resolved: { bg: '#f0fdf4', text: '#16a34a' },
-      accepted_risk: { bg: '#fefce8', text: '#ca8a04' },
-      false_positive: { bg: '#f1f5f9', text: '#475569' }
-    };
-    const s = map[status] || { bg: '#f1f5f9', text: '#475569' };
-    return (
-      <span style={{ backgroundColor: s.bg, color: s.text, padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 600, textTransform: 'capitalize' }}>
-        {status.replace('_', ' ')}
-      </span>
-    );
-  };
-
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
-        <div>
-          <nav className="text-xs font-semibold tracking-wider text-gray-500 uppercase mb-2">Security / Vulnerabilities</nav>
-          <h1 className="text-2xl font-bold text-gray-900 mb-1">Remediation Management</h1>
-          <p className="text-sm text-gray-600">Track, prioritize, and verify vulnerabilities identified by the passive scanner.</p>
-        </div>
-        <button
-          onClick={() => loadFindingsData(true)}
-          disabled={refreshing || loading}
-          className="self-start sm:self-auto px-4 py-2 bg-white border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 transition shadow-sm flex items-center gap-2"
-        >
-          {refreshing ? 'Refreshing...' : '↻ Refresh Findings'}
-        </button>
-      </div>
-
-      {error && <div className="p-4 bg-red-50 border-l-4 border-red-500 rounded text-sm text-red-700"><strong>Error:</strong> {error}</div>}
-
-      {/* Target & Scope Selection */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 flex flex-col sm:flex-row items-center gap-4">
-        <label htmlFor="website-selector" className="text-sm font-semibold text-gray-700 whitespace-nowrap">
-          Target Website:
-        </label>
-        <select
-          id="website-selector"
-          value={websiteFilter}
-          onChange={(e) => setWebsiteFilter(e.target.value)}
-          className="w-full sm:w-auto flex-1 px-4 py-2.5 text-sm bg-gray-50 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
-        >
-          <option value="all" className="font-sans font-semibold">All Authorized Websites</option>
-          {uniqueWebsites.map(url => <option key={url} value={url}>{url}</option>)}
-        </select>
-      </div>
-
-      {/* Aggregated Risk Metrics */}
-      <section className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-        <div className="bg-white rounded-xl shadow-sm border-t-4 border-gray-900 border-x border-b border-gray-200 p-5">
-          <p className="text-sm font-medium text-gray-500 mb-1">Total</p>
-          <h2 className="text-2xl font-bold text-gray-900">{filteredFindings.length}</h2>
-        </div>
-        <div className="bg-white rounded-xl shadow-sm border-t-4 border-red-600 border-x border-b border-gray-200 p-5">
-          <p className="text-sm font-medium text-gray-500 mb-1">Critical</p>
-          <h2 className="text-2xl font-bold text-red-600">{countSeverity('critical')}</h2>
-        </div>
-        <div className="bg-white rounded-xl shadow-sm border-t-4 border-orange-500 border-x border-b border-gray-200 p-5">
-          <p className="text-sm font-medium text-gray-500 mb-1">High</p>
-          <h2 className="text-2xl font-bold text-orange-500">{countSeverity('high')}</h2>
-        </div>
-        <div className="bg-white rounded-xl shadow-sm border-t-4 border-amber-500 border-x border-b border-gray-200 p-5">
-          <p className="text-sm font-medium text-gray-500 mb-1">Medium</p>
-          <h2 className="text-2xl font-bold text-amber-500">{countSeverity('medium')}</h2>
-        </div>
-        <div className="bg-white rounded-xl shadow-sm border-t-4 border-blue-600 border-x border-b border-gray-200 p-5">
-          <p className="text-sm font-medium text-gray-500 mb-1">Low</p>
-          <h2 className="text-2xl font-bold text-blue-600">{countSeverity('low')}</h2>
-        </div>
-        <div className="bg-white rounded-xl shadow-sm border-t-4 border-slate-500 border-x border-b border-gray-200 p-5">
-          <p className="text-sm font-medium text-gray-500 mb-1">Info</p>
-          <h2 className="text-2xl font-bold text-slate-500">{countSeverity('info')}</h2>
-        </div>
-      </section>
-
-      {/* Primary Remediation Table */}
-      <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-6">
-        <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4 pb-4 border-b border-gray-100">
-          <div className="flex flex-col sm:flex-row items-center gap-3">
-            <select value={severityFilter} onChange={(e) => setSeverityFilter(e.target.value)} className="w-full sm:w-auto px-3 py-2 text-sm bg-gray-50 border border-gray-300 rounded-lg">
-              <option value="all">All Severities</option>
-              <option value="critical">Critical</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option><option value="info">Info</option>
-            </select>
-            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="w-full sm:w-auto px-3 py-2 text-sm bg-gray-50 border border-gray-300 rounded-lg capitalize">
-              <option value="all">All Statuses</option>
-              <option value="open">Open</option><option value="in_progress">In Progress</option><option value="resolved">Resolved</option><option value="accepted_risk">Accepted Risk</option><option value="false_positive">False Positive</option>
-            </select>
-          </div>
-          
-          <div className="relative w-full md:w-80">
-            <input type="text" placeholder="Search finding, URL, or ID..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full px-3 py-2 pl-9 text-sm border border-gray-300 rounded-lg" />
-            <svg className="w-4 h-4 text-gray-400 absolute left-3 top-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
-          </div>
-        </div>
-
-        {loading ? (
-          <div className="py-12 flex justify-center items-center">Loading Findings...</div>
-        ) : filteredFindings.length > 0 ? (
-          <div className="overflow-x-auto border border-gray-200 rounded-lg">
-            <table className="min-w-full divide-y divide-gray-200 text-left text-sm">
-              <thead className="bg-gray-50 text-gray-500 font-semibold text-xs uppercase tracking-wider">
-                <tr>
-                  <th className="px-4 py-3">Severity</th>
-                  <th className="px-4 py-3">Vulnerability</th>
-                  <th className="px-4 py-3">Affected Asset</th>
-                  <th className="px-4 py-3">Workflow State</th>
-                  <th className="px-4 py-3 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200 bg-white">
-                {filteredFindings.map((f) => {
-                  const isExpanded = expandedFindingId === f.id;
-                  const nextAllowedStatuses = VALID_TRANSITIONS[f.status] || [];
-
-                  return (
-                    <React.Fragment key={f.id}>
-                      <tr className="hover:bg-gray-50 transition">
-                        <td className="px-4 py-3.5 whitespace-nowrap">{getSeverityBadge(f.severity)}</td>
-                        <td className="px-4 py-3.5">
-                          <div className="font-bold text-gray-900">{f.title}</div>
-                          <div className="text-xs text-gray-500">{f.vulnerability_type?.replaceAll('_', ' ')}</div>
-                        </td>
-                        <td className="px-4 py-3.5 max-w-[200px] truncate font-mono text-xs text-gray-600" title={f.affected_url || f.target_url}>
-                          {f.affected_url || f.target_url || 'Target Wide'}
-                        </td>
-                        <td className="px-4 py-3.5 whitespace-nowrap">
-                          {getStatusBadge(f.status)}
-                          <div className="text-[10px] text-gray-500 mt-1">Conf: {(f.ai_confidence * 100).toFixed(0)}%</div>
-                        </td>
-                        <td className="px-4 py-3.5 whitespace-nowrap text-right">
-                          <button onClick={() => loadFindingDetails(f.id)} className="px-2.5 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 rounded transition">
-                            {isExpanded ? 'Collapse' : 'Remediate'}
-                          </button>
-                        </td>
-                      </tr>
-
-                      {/* Expandable Remediation Drawer */}
-                      {isExpanded && (
-                        <tr className="bg-slate-50 border-b-2 border-slate-200">
-                          <td colSpan="5" className="px-6 py-5 text-sm text-gray-700">
-                            {/* Workflow Bar */}
-                            <div className="flex justify-between items-center flex-wrap gap-4 mb-5 pb-4 border-b border-gray-200">
-                              <div className="flex gap-2">
-                                <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider mt-2 mr-2">Set State:</span>
-                                {nextAllowedStatuses.map((nextSt) => (
-                                  <button
-                                    key={nextSt}
-                                    onClick={() => handleStatusChange(f.id, nextSt)}
-                                    className="px-3 py-1.5 text-xs font-semibold border border-gray-300 bg-white rounded hover:bg-gray-50"
-                                  >
-                                    Mark as {nextSt.replace('_', ' ')}
-                                  </button>
-                                ))}
-                              </div>
-                              {f.scan_id && (
-                                <Link to={`/scan/${f.scan_id}`} className="px-3 py-1.5 text-xs font-semibold bg-gray-900 text-white rounded">
-                                  View Source Scan
-                                </Link>
-                              )}
-                            </div>
-
-                            {/* Tabs */}
-                            <div className="flex gap-4 border-b border-gray-300 mb-4">
-                              {['evidence', 'notes', 'history'].map((tab) => (
-                                <button key={tab} onClick={() => setDrawerTab(tab)} className={`pb-2 text-xs font-bold uppercase tracking-wider ${drawerTab === tab ? 'border-b-2 border-gray-900 text-gray-900' : 'text-gray-500'}`}>
-                                  {tab === 'evidence' ? 'Technical Details' : tab === 'notes' ? `Notes (${notes.length})` : `Audit Trail (${history.length})`}
-                                </button>
-                              ))}
-                            </div>
-
-                            {/* Content */}
-                            {drawerTab === 'evidence' && (
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <div>
-                                  <h4 className="font-bold text-xs uppercase text-gray-500 mb-1">Vulnerability Description</h4>
-                                  <p className="whitespace-pre-wrap mb-4">{f.description}</p>
-                                  <h4 className="font-bold text-xs uppercase text-gray-500 mb-1">Remediation Guidance</h4>
-                                  <p className="p-3 bg-emerald-50 text-emerald-900 border border-emerald-200 rounded">{f.remediation}</p>
-                                </div>
-                                <div>
-                                  <h4 className="font-bold text-xs uppercase text-gray-500 mb-1">Context & Evidence</h4>
-                                  <pre className="p-3 bg-gray-900 text-emerald-400 rounded text-xs font-mono overflow-x-auto mb-4 border border-gray-800">
-                                    {JSON.stringify(f.evidence, null, 2)}
-                                  </pre>
-                                  <div className="grid grid-cols-2 gap-2 text-xs p-3 bg-white border border-gray-200 rounded">
-                                    <div><span className="font-semibold text-gray-500">First Seen:</span> {formatDate(f.created_at)}</div>
-                                    <div><span className="font-semibold text-gray-500">Last Seen:</span> {formatDate(f.last_seen_at || f.created_at)}</div>
-                                    <div><span className="font-semibold text-gray-500">CVSS:</span> {f.cvss_score || 'N/A'}</div>
-                                    <div><span className="font-semibold text-gray-500">Finding ID:</span> <span className="font-mono text-gray-400">{String(f.id).split('-')[0]}...</span></div>
-                                  </div>
-                                </div>
-                              </div>
-                            )}
-
-                            {drawerTab === 'notes' && (
-                              <div>
-                                <div className="max-h-48 overflow-y-auto space-y-2 mb-4">
-                                  {notes.length > 0 ? notes.map(n => (
-                                    <div key={n.id} className="p-3 bg-white border border-gray-200 rounded text-xs">
-                                      <div className="flex justify-between text-gray-500 mb-1">
-                                        <span className="font-bold text-gray-900">{n.author_name || n.author_email}</span>
-                                        <span>{new Date(n.created_at).toLocaleString()}</span>
-                                      </div>
-                                      <div className="whitespace-pre-wrap text-gray-700">{n.note}</div>
-                                    </div>
-                                  )) : <p className="text-xs text-gray-500">No remediation notes exist yet.</p>}
-                                </div>
-                                <form onSubmit={(e) => handleAddNote(e, f.id)} className="flex gap-2">
-                                  <input type="text" placeholder="Add a remediation note..." value={newNoteText} onChange={(e) => setNewNoteText(e.target.value)} className="flex-1 p-2 text-xs border border-gray-300 rounded" />
-                                  <button type="submit" disabled={submittingNote || !newNoteText.trim()} className="px-4 py-2 bg-gray-900 text-white text-xs font-bold rounded">Post</button>
-                                </form>
-                              </div>
-                            )}
-
-                            {drawerTab === 'history' && (
-                              <table className="w-full text-xs text-left">
-                                <thead>
-                                  <tr className="text-gray-500 border-b border-gray-200">
-                                    <th className="py-2">Action</th><th className="py-2">Actor</th><th className="py-2">Details</th><th className="py-2">Time</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {history.map(h => (
-                                    <tr key={h.id} className="border-b border-gray-100">
-                                      <td className="py-2 font-bold text-gray-900">{h.action.replace('_', ' ')}</td>
-                                      <td className="py-2">{h.actor_name}</td>
-                                      <td className="py-2 text-gray-600">{h.previous_value && h.new_value ? `${h.previous_value} → ${h.new_value}` : h.new_value || ''}</td>
-                                      <td className="py-2 text-gray-400">{new Date(h.created_at).toLocaleString()}</td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            )}
-                          </td>
-                        </tr>
-                      )}
-                    </React.Fragment>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div className="py-16 text-center border-2 border-dashed border-gray-200 rounded-lg text-gray-500 text-sm">
-            {websiteFilter !== 'all' ? `No vulnerabilities match your criteria for ${websiteFilter}.` : 'Your authorized scans have not identified any vulnerabilities.'}
-          </div>
-        )}
-      </section>
-    </div>
+    <span className={`inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset capitalize ${style}`}>
+      <SeverityIcon severity={severity} />
+      {severity}
+    </span>
   );
 };
 
-export default Vulnerabilities;
+export default function Vulnerabilities() {
+  const [findings, setFindings] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [severityFilter, setSeverityFilter] = useState('all');
+  const [websiteFilter, setWebsiteFilter] = useState('all');
+  const [expandedId, setExpandedId] = useState(null);
+
+  const load = () => {
+    setLoading(true);
+    setError('');
+    getAllFindings()
+      .then((res) => {
+        const data = res.findings || res.data || res;
+        setFindings(Array.isArray(data) ? data : []);
+      })
+      .catch((e) => setError(e.response?.data?.error || e.message || 'Unable to load findings.'))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  const allWebsites = React.useMemo(() => {
+    const sites = new Set();
+    findings.forEach(f => {
+      const target = f.target_url || f.affected_url || 'Unknown Website';
+      try { sites.add(new URL(target).origin); }
+      catch { sites.add(target); }
+    });
+    return Array.from(sites).sort();
+  }, [findings]);
+
+  // Default to the first website if "all" is selected, to prevent showing everything at once
+  useEffect(() => {
+    if (websiteFilter === 'all' && allWebsites.length > 0) {
+      setWebsiteFilter(allWebsites[0]);
+    }
+  }, [allWebsites, websiteFilter]);
+
+  const filteredFindings = findings.filter(f => {
+    const matchesSearch = 
+      (f.title || '').toLowerCase().includes(searchTerm.toLowerCase()) || 
+      (f.description || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (f.affected_url || '').toLowerCase().includes(searchTerm.toLowerCase());
+    
+    const matchesSev = severityFilter === 'all' || f.severity?.toLowerCase() === severityFilter;
+    
+    let website = f.target_url || f.affected_url || 'Unknown Website';
+    try { website = new URL(website).origin; } catch {}
+    const matchesWebsite = websiteFilter === 'all' || website === websiteFilter;
+    
+    return matchesSearch && matchesSev && matchesWebsite;
+  });
+
+  const groupedFindings = filteredFindings.reduce((acc, finding) => {
+    const target = finding.target_url || finding.affected_url || 'Unknown Website';
+    let website = target;
+    try {
+      website = new URL(target).origin;
+    } catch {
+      // Ignore if not a valid URL
+    }
+    if (!acc[website]) acc[website] = [];
+    acc[website].push(finding);
+    return acc;
+  }, {});
+
+  const toggleExpand = (id) => {
+    setExpandedId(expandedId === id ? null : id);
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-bold leading-7 text-white sm:truncate sm:text-3xl sm:tracking-tight flex items-center gap-2">
+            <ShieldAlert className="h-8 w-8 text-brand-500" />
+            Findings & Vulnerabilities
+          </h2>
+          <p className="mt-1 text-sm text-slate-400">
+            A consolidated view of all discovered security issues across your applications.
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <button onClick={load} className="btn-secondary" title="Refresh">
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+          </button>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-header flex flex-col sm:flex-row justify-between gap-4 items-center">
+          <div className="relative w-full sm:max-w-xs">
+            <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+              <Search className="h-4 w-4 text-slate-500" aria-hidden="true" />
+            </div>
+            <input
+              type="text"
+              className="block w-full rounded-md border-0 bg-slate-900 py-1.5 pl-10 text-white shadow-sm ring-1 ring-inset ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-brand-500 sm:text-sm sm:leading-6"
+              placeholder="Search findings, URLs, descriptions..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </div>
+          <div className="w-full md:w-auto flex flex-col sm:flex-row gap-3">
+            <select
+              value={websiteFilter}
+              onChange={(e) => setWebsiteFilter(e.target.value)}
+              className="block w-full sm:w-48 rounded-md border-0 bg-slate-900 py-1.5 pl-3 pr-10 text-white shadow-sm ring-1 ring-inset ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-brand-500 sm:text-sm sm:leading-6 truncate"
+            >
+              <option value="all">All Websites</option>
+              {allWebsites.map(site => (
+                <option key={site} value={site}>{site}</option>
+              ))}
+            </select>
+            <select
+              value={severityFilter}
+              onChange={(e) => setSeverityFilter(e.target.value)}
+              className="block w-full sm:w-40 rounded-md border-0 bg-slate-900 py-1.5 pl-3 pr-10 text-white shadow-sm ring-1 ring-inset ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-brand-500 sm:text-sm sm:leading-6"
+            >
+              <option value="all">All Severities</option>
+              <option value="critical">Critical</option>
+              <option value="high">High</option>
+              <option value="medium">Medium</option>
+              <option value="low">Low</option>
+              <option value="info">Info</option>
+            </select>
+          </div>
+        </div>
+        
+        <div className="table-container bg-transparent">
+          {error && (
+            <div className="p-4 bg-red-500/10 border-b border-red-500/50 flex items-center gap-3">
+              <AlertCircle className="h-5 w-5 text-red-500" />
+              <p className="text-sm text-red-500">{error}</p>
+            </div>
+          )}
+
+          {loading && findings.length === 0 ? (
+            <div className="p-12 text-center text-slate-400">
+              <RefreshCw className="h-8 w-8 animate-spin mx-auto text-brand-500 mb-3" />
+              <p>Loading findings...</p>
+            </div>
+          ) : filteredFindings.length > 0 ? (
+            <div className="space-y-6">
+              {Object.entries(groupedFindings).map(([website, siteFindings]) => (
+                <div key={website} className="border border-slate-700 rounded-lg overflow-hidden bg-slate-900">
+                  <div className="px-6 py-4 bg-slate-800/80 border-b border-slate-700 flex items-center justify-between">
+                    <h3 className="text-base font-semibold text-white flex items-center gap-2">
+                      <Globe className="h-5 w-5 text-brand-500" /> {website}
+                    </h3>
+                    <span className="text-xs font-medium text-slate-300 bg-slate-900 px-3 py-1 rounded-full border border-slate-700">
+                      {siteFindings.length} {siteFindings.length === 1 ? 'Finding' : 'Findings'}
+                    </span>
+                  </div>
+                  <table className="table w-full m-0">
+                    <thead>
+                      <tr className="bg-slate-900/50">
+                        <th className="w-8 border-y-0"></th>
+                        <th className="border-y-0">Severity</th>
+                        <th className="border-y-0">Title</th>
+                        <th className="border-y-0">Affected URL</th>
+                        <th className="border-y-0">Scan ID</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/50">
+                      {siteFindings.map((finding) => (
+                        <React.Fragment key={finding.id}>
+                          <tr 
+                            className={`cursor-pointer transition-colors hover:bg-slate-800/80 ${expandedId === finding.id ? 'bg-slate-800' : ''}`}
+                            onClick={() => toggleExpand(finding.id)}
+                          >
+                            <td className="px-6 py-4 w-8 text-slate-400">
+                              {expandedId === finding.id ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <SeverityBadge severity={finding.severity} />
+                            </td>
+                            <td className="px-6 py-4 font-medium text-white max-w-sm truncate" title={finding.title || finding.vulnerability_type}>
+                              {finding.title || finding.vulnerability_type?.replace(/_/g, ' ') || 'Unknown Issue'}
+                            </td>
+                            <td className="px-6 py-4 text-slate-400 max-w-xs truncate" title={finding.affected_url}>
+                              {finding.affected_url || 'N/A'}
+                            </td>
+                            <td className="px-6 py-4">
+                              <Link 
+                                to={`/scan/${finding.scan_id}`} 
+                                className="text-brand-400 hover:text-brand-300 text-sm font-medium inline-flex items-center gap-1"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                View Scan <ArrowUpRight className="h-3 w-3" />
+                              </Link>
+                            </td>
+                          </tr>
+                          {expandedId === finding.id && (
+                            <tr>
+                              <td colSpan={5} className="bg-slate-950 p-0 border-b border-slate-700 inset-shadow">
+                                <div className="p-6 md:pl-24 space-y-6">
+                                  
+                                  <div>
+                                    <h4 className="text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">Description</h4>
+                                    <p className="text-sm text-slate-300 leading-relaxed max-w-4xl bg-slate-900 p-4 rounded-md border border-slate-800">
+                                      {finding.description || 'No description provided.'}
+                                    </p>
+                                  </div>
+
+                                  {finding.evidence && (
+                                    <div>
+                                      <h4 className="text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">Evidence</h4>
+                                      <pre className="text-xs font-mono text-brand-300 bg-slate-900 p-4 rounded-md border border-slate-800 overflow-x-auto whitespace-pre-wrap">
+                                        {finding.evidence}
+                                      </pre>
+                                    </div>
+                                  )}
+
+                                  {finding.remediation && (
+                                    <div>
+                                      <h4 className="text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">Remediation Recommendation</h4>
+                                      <div className="text-sm text-slate-300 leading-relaxed bg-brand-900/20 p-4 rounded-md border border-brand-500/20">
+                                        {finding.remediation}
+                                      </div>
+                                    </div>
+                                  )}
+                                  
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="p-16 text-center">
+              <ShieldAlert className="mx-auto h-12 w-12 text-slate-600 mb-4" />
+              <h3 className="mt-2 text-sm font-semibold text-white">No findings</h3>
+              <p className="mt-1 text-sm text-slate-400">
+                {searchTerm || severityFilter !== 'all' ? 'No findings match your criteria.' : 'Great job! No vulnerabilities discovered.'}
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

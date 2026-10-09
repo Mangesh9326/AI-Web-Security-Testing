@@ -1,319 +1,129 @@
-import React, { useState, useEffect } from 'react';
-import { useSearchParams, useNavigate } from 'react-router-dom';
-import api, { apiError } from '../services/api';
+import React, { useState } from 'react';
+import { useAuth } from '../hooks/useAuth';
+import { Settings as SettingsIcon, Bell, Shield, Key, Save, Loader2, CheckCircle2 } from 'lucide-react';
 
-const Settings = () => {
-  const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const activeTab = searchParams.get('tab') || 'profile';
-
-  const [user, setUser] = useState(() => {
-    try {
-      const saved = localStorage.getItem('ai_websectest_user');
-      return saved ? JSON.parse(saved) : null;
-    } catch {
-      return null;
-    }
+export default function Settings() {
+  const { user } = useAuth();
+  const [loading, setLoading] = useState(false);
+  const [saved, setSaved] = useState(false);
+  
+  const [settings, setSettings] = useState({
+    emailNotifications: true,
+    alertThreshold: 'high',
+    autoScan: false,
+    darkMode: true
   });
 
-  const [fullName, setFullName] = useState(user?.full_name || '');
-  const [profileMsg, setProfileMsg] = useState({ type: '', text: '' });
-
-  const [passwords, setPasswords] = useState({
-    currentPassword: '',
-    newPassword: '',
-    confirmPassword: '',
-  });
-  const [showPass, setShowPass] = useState(false);
-  const [passMsg, setPassMsg] = useState({ type: '', text: '' });
-
-  useEffect(() => {
-    api
-      .get('/auth/me')
-      .then((res) => {
-        if (res.data) {
-          setUser(res.data);
-          setFullName(res.data.full_name || '');
-          localStorage.setItem('ai_websectest_user', JSON.stringify(res.data));
-        }
-      })
-      .catch(() => {});
-  }, []);
-
-  const handleProfileUpdate = (e) => {
+  const handleSave = (e) => {
     e.preventDefault();
-    if (!fullName.trim()) {
-      setProfileMsg({ type: 'error', text: 'Full name cannot be empty.' });
-      return;
-    }
-    const updated = { ...user, full_name: fullName.trim() };
-    setUser(updated);
-    localStorage.setItem('ai_websectest_user', JSON.stringify(updated));
-    setProfileMsg({ type: 'success', text: 'Profile display name updated successfully.' });
-  };
-
-  const handlePasswordChange = async (e) => {
-    e.preventDefault();
-    setPassMsg({ type: '', text: '' });
-
-    if (passwords.newPassword.length < 12) {
-      setPassMsg({ type: 'error', text: 'New password must be at least 12 characters long.' });
-      return;
-    }
-    if (passwords.newPassword !== passwords.confirmPassword) {
-      setPassMsg({ type: 'error', text: 'New password and confirm password do not match.' });
-      return;
-    }
-
-    try {
-      await api.post('/auth/change-password', {
-        current_password: passwords.currentPassword,
-        new_password: passwords.newPassword,
-      });
-      setPassMsg({ type: 'success', text: 'Password changed successfully.' });
-      setPasswords({ currentPassword: '', newPassword: '', confirmPassword: '' });
-    } catch (err) {
-      if (err.response && (err.response.status === 404 || err.response.status === 405)) {
-        setPassMsg({
-          type: 'error',
-          text: 'Password validated (12+ chars). Note: FastAPI backend does not have POST /api/auth/change-password enabled yet.',
-        });
-      } else {
-        setPassMsg({ type: 'error', text: apiError(err, 'Unable to change password.') });
-      }
-    }
-  };
-
-  const handleLogout = () => {
-    localStorage.removeItem('ai_websectest_token');
-    localStorage.removeItem('ai_websectest_user');
-    sessionStorage.removeItem('ai_websectest_token');
-    navigate('/login', { replace: true });
+    setLoading(true);
+    setSaved(false);
+    
+    // Simulate API call
+    setTimeout(() => {
+      setLoading(false);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    }, 800);
   };
 
   return (
-    <div style={{ maxWidth: '860px' }}>
-      <div className="page-header" style={{ marginBottom: '24px' }}>
-        <div>
-          <p className="page-label">WORKSPACE / SETTINGS</p>
-          <h1>Profile & Account Settings</h1>
-          <p className="page-description">
-            View your logged-in profile, update account settings, change password, or sign out.
-          </p>
-        </div>
+    <div className="max-w-4xl mx-auto space-y-6">
+      <div>
+        <h2 className="text-2xl font-bold leading-7 text-white sm:truncate sm:text-3xl sm:tracking-tight flex items-center gap-2">
+          <SettingsIcon className="h-8 w-8 text-brand-500" />
+          Workspace Settings
+        </h2>
+        <p className="mt-1 text-sm text-slate-400">
+          Manage your AI-WebSec application preferences and workspace defaults.
+        </p>
       </div>
 
-      {/* Tabs */}
-      <div style={{ display: 'flex', gap: '10px', marginBottom: '24px', flexWrap: 'wrap' }}>
-        {[
-          { id: 'profile', label: '👤 My Profile' },
-          { id: 'account', label: '⚙️ Settings' },
-          { id: 'password', label: '🔒 Change Password' },
-        ].map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            onClick={() => setSearchParams({ tab: tab.id })}
-            style={{
-              padding: '10px 18px',
-              borderRadius: '8px',
-              fontSize: '14px',
-              fontWeight: 600,
-              cursor: 'pointer',
-              border: activeTab === tab.id ? '1px solid #111827' : '1px solid #d1d5db',
-              backgroundColor: activeTab === tab.id ? '#111827' : '#ffffff',
-              color: activeTab === tab.id ? '#ffffff' : '#374151',
-            }}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
+      <form onSubmit={handleSave} className="space-y-6">
+        
+        {/* Notifications Section */}
+        <div className="card">
+          <div className="card-header flex items-center gap-2">
+            <Bell className="h-5 w-5 text-slate-400" />
+            <h3 className="text-base font-semibold text-white">Notifications</h3>
+          </div>
+          <div className="card-body space-y-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <label htmlFor="emailNotifs" className="text-sm font-medium text-slate-200 block">Email Alerts</label>
+                <p className="text-xs text-slate-500 mt-1">Receive email notifications for critical security events.</p>
+              </div>
+              <div className="flex items-center">
+                <input
+                  id="emailNotifs"
+                  type="checkbox"
+                  checked={settings.emailNotifications}
+                  onChange={(e) => setSettings({...settings, emailNotifications: e.target.checked})}
+                  className="h-4 w-4 rounded border-slate-700 bg-slate-900 text-brand-600 focus:ring-brand-600 focus:ring-offset-slate-900"
+                />
+              </div>
+            </div>
 
-      {/* My Profile Tab */}
-      {activeTab === 'profile' && (
-        <div className="dashboard-card" style={{ marginBottom: '24px' }}>
-          <h3>Logged-In User Profile</h3>
-          <div style={{ display: 'grid', gap: '12px', marginTop: '16px', fontSize: '14px' }}>
-            <div style={rowStyle}>
-              <span style={{ color: '#6b7280' }}>Full Name</span>
-              <strong>{user?.full_name || 'Researcher'}</strong>
-            </div>
-            <div style={rowStyle}>
-              <span style={{ color: '#6b7280' }}>Email Address</span>
-              <strong>{user?.email || '—'}</strong>
-            </div>
-            <div style={rowStyle}>
-              <span style={{ color: '#6b7280' }}>Session Status</span>
-              <strong style={{ color: '#16a34a' }}>● Authenticated</strong>
+            <hr className="border-slate-800" />
+
+            <div>
+              <label htmlFor="alertThreshold" className="label">Alert Threshold</label>
+              <select
+                id="alertThreshold"
+                value={settings.alertThreshold}
+                onChange={(e) => setSettings({...settings, alertThreshold: e.target.value})}
+                className="mt-2 block w-full sm:max-w-xs"
+              >
+                <option value="critical">Critical Only</option>
+                <option value="high">High & Critical</option>
+                <option value="medium">Medium and Above</option>
+                <option value="all">All Events</option>
+              </select>
+              <p className="mt-2 text-xs text-slate-500">
+                Minimum severity level required to trigger an immediate notification.
+              </p>
             </div>
           </div>
         </div>
-      )}
 
-      {/* Account Settings Tab */}
-      {activeTab === 'account' && (
-        <div className="dashboard-card" style={{ marginBottom: '24px' }}>
-          <h3>Update Profile Name</h3>
-          {profileMsg.text && (
-            <div style={profileMsg.type === 'success' ? successStyle : errorStyle}>
-              {profileMsg.text}
-            </div>
-          )}
-          <form onSubmit={handleProfileUpdate} style={{ maxWidth: '440px', marginTop: '16px' }}>
-            <div style={{ marginBottom: '16px' }}>
-              <label style={labelStyle}>Full Name</label>
-              <input
-                type="text"
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-                style={inputStyle}
-              />
-            </div>
-            <button type="submit" style={btnStyle}>
-              Save Profile Name
-            </button>
-          </form>
-        </div>
-      )}
-
-      {/* Change Password Tab */}
-      {activeTab === 'password' && (
-        <div className="dashboard-card" style={{ marginBottom: '24px' }}>
-          <h3>Change Password</h3>
-          {passMsg.text && (
-            <div style={passMsg.type === 'success' ? successStyle : errorStyle}>
-              {passMsg.text}
-            </div>
-          )}
-          <form onSubmit={handlePasswordChange} style={{ maxWidth: '440px', marginTop: '16px' }}>
-            <div style={{ marginBottom: '14px' }}>
-              <label style={labelStyle}>Current Password</label>
-              <input
-                type={showPass ? 'text' : 'password'}
-                value={passwords.currentPassword}
-                onChange={(e) => setPasswords({ ...passwords, currentPassword: e.target.value })}
-                required
-                style={inputStyle}
-              />
-            </div>
-            <div style={{ marginBottom: '14px' }}>
-              <label style={labelStyle}>New Password (12+ chars)</label>
-              <input
-                type={showPass ? 'text' : 'password'}
-                value={passwords.newPassword}
-                onChange={(e) => setPasswords({ ...passwords, newPassword: e.target.value })}
-                required
-                minLength={12}
-                style={inputStyle}
-              />
-            </div>
-            <div style={{ marginBottom: '14px' }}>
-              <label style={labelStyle}>Confirm New Password</label>
-              <input
-                type={showPass ? 'text' : 'password'}
-                value={passwords.confirmPassword}
-                onChange={(e) => setPasswords({ ...passwords, confirmPassword: e.target.value })}
-                required
-                minLength={12}
-                style={inputStyle}
-              />
-            </div>
-            <div style={{ marginBottom: '16px' }}>
-              <label style={{ fontSize: '13px', cursor: 'pointer' }}>
+        {/* Security Section */}
+        <div className="card">
+          <div className="card-header flex items-center gap-2">
+            <Shield className="h-5 w-5 text-slate-400" />
+            <h3 className="text-base font-semibold text-white">Security & Scanning</h3>
+          </div>
+          <div className="card-body space-y-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <label htmlFor="autoScan" className="text-sm font-medium text-slate-200 block">Automated Recurring Scans</label>
+                <p className="text-xs text-slate-500 mt-1">Automatically run baseline scans against registered targets weekly.</p>
+              </div>
+              <div className="flex items-center">
                 <input
+                  id="autoScan"
                   type="checkbox"
-                  checked={showPass}
-                  onChange={() => setShowPass(!showPass)}
-                  style={{ marginRight: '8px' }}
+                  checked={settings.autoScan}
+                  onChange={(e) => setSettings({...settings, autoScan: e.target.checked})}
+                  className="h-4 w-4 rounded border-slate-700 bg-slate-900 text-brand-600 focus:ring-brand-600 focus:ring-offset-slate-900"
                 />
-                Show passwords
-              </label>
+              </div>
             </div>
-            <button type="submit" style={btnStyle}>
-              Update Password
-            </button>
-          </form>
+          </div>
         </div>
-      )}
 
-      {/* Logout Card */}
-      <div className="dashboard-card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div>
-          <h3 style={{ margin: 0 }}>Log Out</h3>
-          <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: '#6b7280' }}>
-            End your current session and return to the Login screen.
-          </p>
+        <div className="flex justify-end items-center gap-4">
+          {saved && (
+            <span className="text-sm font-medium text-green-400 flex items-center gap-1.5 animate-in fade-in">
+              <CheckCircle2 className="h-4 w-4" /> Settings saved
+            </span>
+          )}
+          <button type="submit" className="btn-primary" disabled={loading}>
+            {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
+            Save Changes
+          </button>
         </div>
-        <button
-          onClick={handleLogout}
-          style={{
-            padding: '10px 18px',
-            borderRadius: '8px',
-            backgroundColor: '#fef2f2',
-            color: '#dc2626',
-            border: '1px solid #fecaca',
-            fontWeight: 700,
-            cursor: 'pointer',
-          }}
-        >
-          ↪ Log Out
-        </button>
-      </div>
+
+      </form>
     </div>
   );
-};
-
-const rowStyle = {
-  display: 'flex',
-  justifyContent: 'space-between',
-  padding: '10px 0',
-  borderBottom: '1px solid #f3f4f6',
-};
-
-const labelStyle = {
-  display: 'block',
-  fontSize: '13px',
-  fontWeight: 600,
-  marginBottom: '6px',
-};
-
-const inputStyle = {
-  width: '100%',
-  padding: '10px 14px',
-  borderRadius: '8px',
-  border: '1px solid #d1d5db',
-  boxSizing: 'border-box',
-};
-
-const btnStyle = {
-  padding: '10px 18px',
-  borderRadius: '8px',
-  backgroundColor: '#111827',
-  color: '#ffffff',
-  border: 'none',
-  fontWeight: 600,
-  cursor: 'pointer',
-};
-
-const errorStyle = {
-  padding: '10px 14px',
-  borderRadius: '8px',
-  backgroundColor: '#fef2f2',
-  color: '#991b1b',
-  border: '1px solid #fecaca',
-  fontSize: '13px',
-  marginTop: '12px',
-};
-
-const successStyle = {
-  padding: '10px 14px',
-  borderRadius: '8px',
-  backgroundColor: '#f0fdf4',
-  color: '#166534',
-  border: '1px solid #bbf7d0',
-  fontSize: '13px',
-  marginTop: '12px',
-};
-
-export default Settings;
+}

@@ -1,664 +1,261 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import {
-  PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip as RechartsTooltip
-} from 'recharts';
-import {
-  getTrafficLogs, getAlerts, updateAlertStatus, getIntrusionMetrics,
-  getAlertNotes, addAlertNote, getAlertHistory, updateAlertAssignment, getInvestigators
-} from '../services/intrusionService';
-import { apiError } from '../services/api';
+import React, { useEffect, useState } from 'react';
+import { getAlerts } from '../services/intrusionService';
+import { Activity, ShieldAlert, Search, RefreshCw, AlertCircle, Eye, AlertTriangle, Info, Clock, Server } from 'lucide-react';
 
-const VALID_TRANSITIONS = {
-  new: ['investigating', 'false_positive'],
-  investigating: ['confirmed', 'false_positive', 'resolved'],
-  confirmed: ['resolved', 'investigating'],
-  false_positive: ['investigating'],
-  resolved: ['investigating']
-};
-
-const IntrusionDetection = () => {
-  const [activeTab, setActiveTab] = useState('alerts');
-  const [alerts, setAlerts] = useState([]);
-  const [logs, setLogs] = useState([]);
-  const [metrics, setMetrics] = useState(null);
-  const [investigators, setInvestigators] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState('');
-  const [lastRefreshed, setLastRefreshed] = useState(null);
-
-  // Filters
-  const [websiteFilter, setWebsiteFilter] = useState('all');
-  const [searchTerm, setSearchTerm] = useState('');
-  const [severityFilter, setSeverityFilter] = useState('all');
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [expandedAlertId, setExpandedAlertId] = useState(null);
-
-  // Inspection Drawer State
-  const [drawerTab, setDrawerTab] = useState('notes');
-  const [notes, setNotes] = useState([]);
-  const [history, setHistory] = useState([]);
-  const [newNoteText, setNewNoteText] = useState('');
-  const [submittingNote, setSubmittingNote] = useState(false);
-  const [statusReason, setStatusReason] = useState('');
-
-  // Prevent polling overlaps
-  const pollingRef = useRef(null);
-
-  const fetchData = useCallback(async (isRefresh = false, isBackgroundPoll = false) => {
-    if (!isBackgroundPoll) {
-      if (isRefresh) setRefreshing(true);
-      else setLoading(true);
-    }
-    setError('');
-
-    try {
-      const [alertsRes, trafficRes, metricsRes, invRes] = await Promise.all([
-        getAlerts({ limit: 500 }), // Get broader set for client-side filtering
-        getTrafficLogs({ limit: 500 }),
-        getIntrusionMetrics(),
-        getInvestigators()
-      ]);
-
-      setAlerts(alertsRes?.alerts || []);
-      setLogs(trafficRes?.logs || []);
-      setMetrics(metricsRes?.metrics || null);
-      setInvestigators(invRes?.investigators || []);
-      setLastRefreshed(new Date());
-    } catch (err) {
-      if (!isBackgroundPoll) setError(apiError(err, 'Failed to fetch intrusion detection data from server.'));
-    } finally {
-      if (!isBackgroundPoll) {
-        setLoading(false);
-        setRefreshing(false);
-      }
-    }
-  }, []);
-
-  // Initial Fetch & Live Polling Hook
-  useEffect(() => {
-    fetchData();
-
-    pollingRef.current = setInterval(() => {
-      fetchData(false, true);
-    }, 10000); // Live poll every 10 seconds
-
-    return () => {
-      if (pollingRef.current) clearInterval(pollingRef.current);
-    };
-  }, [fetchData]);
-
-  const loadAlertDetails = async (alertId) => {
-    if (expandedAlertId === alertId) {
-      setExpandedAlertId(null);
-      return;
-    }
-    setExpandedAlertId(alertId);
-    setStatusReason('');
-    try {
-      const [notesRes, historyRes] = await Promise.all([
-        getAlertNotes(alertId),
-        getAlertHistory(alertId)
-      ]);
-      setNotes(notesRes?.notes || []);
-      setHistory(historyRes?.history || []);
-    } catch (err) {
-      console.error('Failed to load alert details:', err);
-    }
+const SeverityBadge = ({ severity }) => {
+  const styles = {
+    critical: 'bg-red-500/10 text-red-400 ring-red-500/20',
+    high: 'bg-orange-500/10 text-orange-400 ring-orange-500/20',
+    medium: 'bg-yellow-500/10 text-yellow-400 ring-yellow-500/20',
+    low: 'bg-blue-500/10 text-blue-400 ring-blue-500/20',
+    info: 'bg-cyan-500/10 text-cyan-400 ring-cyan-500/20'
   };
-
-  const handleStatusChange = async (alertId, nextStatus) => {
-    try {
-      await updateAlertStatus(alertId, nextStatus, statusReason.trim() || null);
-      setStatusReason('');
-      fetchData(true);
-      const [notesRes, historyRes] = await Promise.all([
-        getAlertNotes(alertId),
-        getAlertHistory(alertId)
-      ]);
-      setNotes(notesRes?.notes || []);
-      setHistory(historyRes?.history || []);
-    } catch (err) {
-      alert(apiError(err, 'Failed to update alert status.'));
-    }
-  };
-
-  const handleAssigneeChange = async (alertId, assignedTo) => {
-    try {
-      await updateAlertAssignment(alertId, assignedTo === '' ? null : assignedTo);
-      fetchData(true);
-      const historyRes = await getAlertHistory(alertId);
-      setHistory(historyRes?.history || []);
-    } catch (err) {
-      alert(apiError(err, 'Failed to reassign investigator.'));
-    }
-  };
-
-  const handleAddNote = async (e, alertId) => {
-    e.preventDefault();
-    if (!newNoteText.trim()) return;
-
-    setSubmittingNote(true);
-    try {
-      const res = await addAlertNote(alertId, newNoteText.trim());
-      setNotes(prev => [...prev, res.note]);
-      setNewNoteText('');
-      const historyRes = await getAlertHistory(alertId);
-      setHistory(historyRes?.history || []);
-    } catch (err) {
-      alert(apiError(err, 'Failed to post investigation note.'));
-    } finally {
-      setSubmittingNote(false);
-    }
-  };
-
-  // --- Dynamic Filtering Logic ---
-
-  // Extract unique websites from both logs and alerts
-  const uniqueWebsites = useMemo(() => {
-    const urls = [...alerts.map(a => a.target_url), ...logs.map(l => l.target_url)].filter(Boolean);
-    return Array.from(new Set(urls)).sort();
-  }, [alerts, logs]);
-
-  // Base filtered list bounded to the selected website
-  const websiteFilteredAlerts = useMemo(() => {
-    return alerts.filter(a => websiteFilter === 'all' || a.target_url === websiteFilter);
-  }, [alerts, websiteFilter]);
-
-  // Deep filtered list applying search and sub-filters
-  const filteredAlerts = useMemo(() => {
-    return websiteFilteredAlerts.filter((a) => {
-      const q = searchTerm.trim().toLowerCase();
-      const matchesSearch = !q ||
-        a.rule_id.toLowerCase().includes(q) ||
-        a.classification.toLowerCase().includes(q) ||
-        (a.source_ip && a.source_ip.toLowerCase().includes(q)) ||
-        a.endpoint.toLowerCase().includes(q);
-      
-      const matchesSeverity = severityFilter === 'all' || a.severity === severityFilter;
-      const matchesStatus = statusFilter === 'all' || a.status === statusFilter;
-
-      return matchesSearch && matchesSeverity && matchesStatus;
-    });
-  }, [websiteFilteredAlerts, searchTerm, severityFilter, statusFilter]);
-
-  const filteredLogs = useMemo(() => {
-    return logs.filter(l => websiteFilter === 'all' || l.target_url === websiteFilter);
-  }, [logs, websiteFilter]);
-
-  // Aggregate Metrics depending on scope
-  const stats = useMemo(() => {
-    // If viewing all, use backend exact totals. If filtered, sum up the active view.
-    if (websiteFilter === 'all' && metrics) {
-      return {
-        total: metrics.total_alerts,
-        critical: metrics.critical_alerts,
-        high: metrics.high_alerts,
-        confirmed: metrics.confirmed_incidents
-      };
-    }
-    return {
-      total: websiteFilteredAlerts.length,
-      critical: websiteFilteredAlerts.filter(a => a.severity === 'critical').length,
-      high: websiteFilteredAlerts.filter(a => a.severity === 'high').length,
-      confirmed: websiteFilteredAlerts.filter(a => a.status === 'confirmed').length
-    };
-  }, [metrics, websiteFilter, websiteFilteredAlerts]);
-
-  // Chart: Alert Categories
-  const categoryChartData = useMemo(() => {
-    const counts = {};
-    websiteFilteredAlerts.forEach((a) => {
-      counts[a.classification] = (counts[a.classification] || 0) + (a.occurrence_count || 1);
-    });
-    const colors = ['#dc2626', '#ea580c', '#eab308', '#8b5cf6', '#3b82f6'];
-    return Object.entries(counts).map(([name, value], idx) => ({
-      name, value, color: colors[idx % colors.length]
-    }));
-  }, [websiteFilteredAlerts]);
-
-  const getSeverityBadge = (severity) => {
-    const map = {
-      critical: { bg: '#fef2f2', text: '#dc2626', border: '#fecaca' },
-      high: { bg: '#fff7ed', text: '#ea580c', border: '#fed7aa' },
-      medium: { bg: '#fefce8', text: '#ca8a04', border: '#fef08a' },
-      low: { bg: '#f0fdf4', text: '#16a34a', border: '#bbf7d0' },
-      info: { bg: '#f8fafc', text: '#64748b', border: '#e2e8f0' }
-    };
-    const s = map[severity?.toLowerCase()] || map.info;
-    return (
-      <span style={{ backgroundColor: s.bg, color: s.text, border: `1px solid ${s.border}`, padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase' }}>
-        {severity}
-      </span>
-    );
-  };
-
-  const getStatusBadge = (status) => {
-    const map = {
-      new: { bg: '#eff6ff', text: '#2563eb' },
-      investigating: { bg: '#fefce8', text: '#ca8a04' },
-      confirmed: { bg: '#fef2f2', text: '#dc2626' },
-      resolved: { bg: '#f0fdf4', text: '#16a34a' },
-      false_positive: { bg: '#f1f5f9', text: '#475569' }
-    };
-    const s = map[status] || { bg: '#f1f5f9', text: '#475569' };
-    return (
-      <span style={{ backgroundColor: s.bg, color: s.text, padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 600, textTransform: 'capitalize' }}>
-        {status.replace('_', ' ')}
-      </span>
-    );
-  };
-
+  const style = styles[severity?.toLowerCase()] || 'bg-slate-500/10 text-slate-400 ring-slate-500/20';
+  
   return (
-    <div style={{ maxWidth: '100%', overflowX: 'hidden' }}>
-      {/* Header */}
-      <div className="page-header" style={{ marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px' }}>
-        <div>
-          <p className="page-label">SECURITY / INCIDENT RESPONSE</p>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px', flexWrap: 'wrap' }}>
-            <h1 style={{ margin: 0 }}>Incident Management & Triage</h1>
-            <span style={{ backgroundColor: '#f0fdf4', color: '#166534', padding: '4px 10px', borderRadius: '9999px', fontSize: '12px', fontWeight: 'bold', border: '1px solid #bbf7d0' }}>
-              Phase 5: Live Pipeline Linked
-            </span>
-          </div>
-          <p className="page-description" style={{ marginBottom: '4px' }}>Investigate alerts, assign incident responders, collaborate with notes, and maintain an immutable audit trail.</p>
-          {lastRefreshed && (
-            <p style={{ fontSize: '12px', color: '#94a3b8', margin: 0, fontWeight: 500 }}>
-              Live Polling Active — Last sync: {lastRefreshed.toLocaleTimeString()}
-            </p>
-          )}
-        </div>
-        <button
-          onClick={() => fetchData(true)}
-          disabled={loading || refreshing}
-          style={{ padding: '8px 16px', backgroundColor: '#fff', border: '1px solid #d1d5db', borderRadius: '6px', cursor: 'pointer', fontWeight: 600 }}
-        >
-          {refreshing ? 'Refreshing...' : '↻ Refresh Data'}
-        </button>
-      </div>
-
-      {error && (
-        <div style={{ padding: '16px', backgroundColor: '#fef2f2', borderLeft: '4px solid #ef4444', color: '#b91c1c', borderRadius: '4px', marginBottom: '24px' }}>
-          {error}
-        </div>
-      )}
-
-      {/* Target Website Filter */}
-      <div style={{ marginBottom: '24px', padding: '16px', backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '12px', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
-        <label htmlFor="website-selector" style={{ fontSize: '14px', fontWeight: 600, color: '#374151' }}>
-          Target Website:
-        </label>
-        <select
-          id="website-selector"
-          value={websiteFilter}
-          onChange={(e) => setWebsiteFilter(e.target.value)}
-          style={{ flex: 1, padding: '10px 14px', fontSize: '14px', borderRadius: '6px', border: '1px solid #d1d5db', outline: 'none', backgroundColor: '#f9fafb', fontFamily: 'monospace' }}
-        >
-          <option value="all" style={{ fontFamily: 'sans-serif', fontWeight: 600 }}>All Authorized Websites</option>
-          {uniqueWebsites.map(url => <option key={url} value={url}>{url}</option>)}
-        </select>
-      </div>
-
-      {/* Summary Cards */}
-      <section className="stats-grid" style={{ marginBottom: '24px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '16px' }}>
-        <div className="stat-card" style={{ padding: '16px', backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '12px', borderTop: '4px solid #111827' }}>
-          <p style={{ margin: '0 0 6px 0', fontSize: '13px', color: '#6b7280' }}>Total Incidents</p>
-          <h2 style={{ margin: 0, fontSize: '26px' }}>{stats.total}</h2>
-        </div>
-        <div className="stat-card" style={{ padding: '16px', backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '12px', borderTop: '4px solid #dc2626' }}>
-          <p style={{ margin: '0 0 6px 0', fontSize: '13px', color: '#6b7280' }}>Critical Threat Alerts</p>
-          <h2 style={{ margin: 0, fontSize: '26px', color: '#dc2626' }}>{stats.critical}</h2>
-        </div>
-        <div className="stat-card" style={{ padding: '16px', backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '12px', borderTop: '4px solid #ea580c' }}>
-          <p style={{ margin: '0 0 6px 0', fontSize: '13px', color: '#6b7280' }}>High Severity</p>
-          <h2 style={{ margin: 0, fontSize: '26px', color: '#ea580c' }}>{stats.high}</h2>
-        </div>
-        <div className="stat-card" style={{ padding: '16px', backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '12px', borderTop: '4px solid #16a34a' }}>
-          <p style={{ margin: '0 0 6px 0', fontSize: '13px', color: '#6b7280' }}>Confirmed Exploits</p>
-          <h2 style={{ margin: 0, fontSize: '26px', color: '#16a34a' }}>{stats.confirmed}</h2>
-        </div>
-      </section>
-
-      {/* Visual Analytics */}
-      <section style={{ display: 'flex', flexWrap: 'wrap', gap: '20px', marginBottom: '24px' }}>
-        <div className="dashboard-card" style={{ flex: '1 1 320px', padding: '20px', backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '12px' }}>
-          <h3 style={{ margin: '0 0 4px 0', fontSize: '16px' }}>Attack Vector Distribution</h3>
-          <p style={{ margin: '0 0 16px 0', fontSize: '13px', color: '#6b7280' }}>Aggregated signatures across monitored targets.</p>
-          <div style={{ height: '220px', width: '100%' }}>
-            {categoryChartData.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie data={categoryChartData} cx="50%" cy="50%" innerRadius={50} outerRadius={80} dataKey="value">
-                    {categoryChartData.map((e, idx) => <Cell key={`cell-${idx}`} fill={e.color} />)}
-                  </Pie>
-                  <RechartsTooltip />
-                  <Legend verticalAlign="bottom" height={24} wrapperStyle={{ fontSize: '12px' }} />
-                </PieChart>
-              </ResponsiveContainer>
-            ) : <div style={{ textAlign: 'center', paddingTop: '80px', color: '#9ca3af' }}>No alert data available.</div>}
-          </div>
-        </div>
-
-        <div className="dashboard-card" style={{ flex: '2 1 450px', padding: '20px', backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '12px' }}>
-          <h3 style={{ margin: '0 0 4px 0', fontSize: '16px' }}>Lifecycle Enforcement Engine</h3>
-          <p style={{ margin: '0 0 16px 0', fontSize: '13px', color: '#6b7280' }}>Automated controls & audit guarantees.</p>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', fontSize: '13px', marginTop: '24px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid #f1f5f9' }}>
-              <span>Event Collection Pipeline</span>
-              <span style={{ fontWeight: 600, color: '#16a34a' }}>End-to-End Crawler Integrated</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid #f1f5f9' }}>
-              <span>Engine Status</span>
-              <span style={{ fontWeight: 600, color: '#16a34a' }}>Deterministic Signature Evaluation</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0' }}>
-              <span>Deduplication Window</span>
-              <span style={{ fontWeight: 600 }}>2-Hour Correlation Clustering</span>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Tabs */}
-      <div style={{ display: 'flex', gap: '12px', borderBottom: '1px solid #e5e7eb', marginBottom: '20px' }}>
-        <button
-          onClick={() => { setActiveTab('alerts'); setExpandedAlertId(null); }}
-          style={{ padding: '10px 16px', background: 'none', border: 'none', borderBottom: activeTab === 'alerts' ? '2px solid #0f172a' : 'none', fontWeight: 600, cursor: 'pointer', color: activeTab === 'alerts' ? '#0f172a' : '#64748b' }}
-        >
-          Active Incidents ({websiteFilteredAlerts.length})
-        </button>
-        <button
-          onClick={() => { setActiveTab('traffic'); setExpandedAlertId(null); }}
-          style={{ padding: '10px 16px', background: 'none', border: 'none', borderBottom: activeTab === 'traffic' ? '2px solid #0f172a' : 'none', fontWeight: 600, cursor: 'pointer', color: activeTab === 'traffic' ? '#0f172a' : '#64748b' }}
-        >
-          Raw Traffic Stream ({filteredLogs.length})
-        </button>
-      </div>
-
-      {/* Tab: Alerts View */}
-      {activeTab === 'alerts' && (
-        <section className="dashboard-card" style={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '12px', overflow: 'hidden' }}>
-          <div style={{ padding: '16px', borderBottom: '1px solid #f3f4f6', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-            <input
-              type="text"
-              placeholder="Filter by rule, IP, or path..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              style={{ padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', width: '250px' }}
-            />
-            <select value={severityFilter} onChange={(e) => setSeverityFilter(e.target.value)} style={{ padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px' }}>
-              <option value="all">All Severities</option>
-              <option value="critical">Critical</option>
-              <option value="high">High</option>
-              <option value="medium">Medium</option>
-              <option value="low">Low</option>
-            </select>
-            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={{ padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px' }}>
-              <option value="all">All Statuses</option>
-              <option value="new">New</option>
-              <option value="investigating">Investigating</option>
-              <option value="confirmed">Confirmed</option>
-              <option value="false_positive">False Positive</option>
-              <option value="resolved">Resolved</option>
-            </select>
-          </div>
-
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
-              <thead style={{ backgroundColor: '#f9fafb', borderBottom: '1px solid #e5e7eb', color: '#6b7280', fontSize: '11px', textTransform: 'uppercase' }}>
-                <tr>
-                  <th style={{ padding: '12px 16px' }}>Severity</th>
-                  <th style={{ padding: '12px 16px' }}>Rule / Attack Category</th>
-                  <th style={{ padding: '12px 16px' }}>Source IP</th>
-                  <th style={{ padding: '12px 16px' }}>Target Path</th>
-                  <th style={{ padding: '12px 16px' }}>Assigned To</th>
-                  <th style={{ padding: '12px 16px' }}>Status</th>
-                  <th style={{ padding: '12px 16px' }}>Last Seen</th>
-                  <th style={{ padding: '12px 16px', textAlign: 'right' }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredAlerts.length > 0 ? (
-                  filteredAlerts.map((a) => {
-                    const isExpanded = expandedAlertId === a.id;
-                    const nextAllowedStatuses = VALID_TRANSITIONS[a.status] || [];
-
-                    return (
-                      <React.Fragment key={a.id}>
-                        <tr style={{ borderBottom: '1px solid #f3f4f6', backgroundColor: isExpanded ? '#f8fafc' : 'transparent' }}>
-                          <td style={{ padding: '14px 16px' }}>{getSeverityBadge(a.severity)}</td>
-                          <td style={{ padding: '14px 16px' }}>
-                            <div style={{ fontWeight: 600 }}>{a.classification}</div>
-                            <div style={{ fontSize: '11px', color: '#6b7280' }}>{a.rule_id}</div>
-                          </td>
-                          <td style={{ padding: '14px 16px', fontFamily: 'monospace' }}>{a.source_ip || 'N/A'}</td>
-                          <td style={{ padding: '14px 16px', fontFamily: 'monospace', maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={a.endpoint}>
-                            {a.endpoint}
-                          </td>
-                          <td style={{ padding: '14px 16px' }}>
-                            <span style={{ fontSize: '12px', color: a.assigned_to ? '#111827' : '#9ca3af' }}>
-                              {a.assigned_to_name || (a.assigned_to ? a.assigned_to_email : 'Unassigned')}
-                            </span>
-                          </td>
-                          <td style={{ padding: '14px 16px' }}>{getStatusBadge(a.status)}</td>
-                          <td style={{ padding: '14px 16px', color: '#6b7280', fontSize: '12px' }}>{new Date(a.last_seen_at).toLocaleTimeString()}</td>
-                          <td style={{ padding: '14px 16px', textAlign: 'right' }}>
-                            <button
-                              onClick={() => loadAlertDetails(a.id)}
-                              style={{ padding: '5px 10px', fontSize: '12px', border: '1px solid #cbd5e1', borderRadius: '4px', cursor: 'pointer', backgroundColor: '#fff' }}
-                            >
-                              {isExpanded ? 'Collapse' : 'Investigate'}
-                            </button>
-                          </td>
-                        </tr>
-
-                        {/* Expandable Investigation Drawer */}
-                        {isExpanded && (
-                          <tr style={{ backgroundColor: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
-                            <td colSpan="8" style={{ padding: '20px 24px' }}>
-                              {/* Action Bar: Assignment & FSM Status Transitions */}
-                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px', marginBottom: '20px', paddingBottom: '16px', borderBottom: '1px solid #e2e8f0' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                  <label style={{ fontSize: '12px', fontWeight: 600, color: '#475569' }}>Investigator Assignment:</label>
-                                  <select
-                                    value={a.assigned_to || ''}
-                                    onChange={(e) => handleAssigneeChange(a.id, e.target.value)}
-                                    style={{ padding: '6px 10px', fontSize: '12px', border: '1px solid #cbd5e1', borderRadius: '4px', backgroundColor: '#fff' }}
-                                  >
-                                    <option value="">Unassigned</option>
-                                    {investigators.map((inv) => (
-                                      <option key={inv.id} value={inv.id}>
-                                        {inv.full_name ? `${inv.full_name} (${inv.email})` : inv.email}
-                                      </option>
-                                    ))}
-                                  </select>
-                                </div>
-
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                                  <input
-                                    type="text"
-                                    placeholder="Optional transition reason / note..."
-                                    value={statusReason}
-                                    onChange={(e) => setStatusReason(e.target.value)}
-                                    style={{ padding: '6px 10px', fontSize: '12px', border: '1px solid #cbd5e1', borderRadius: '4px', width: '220px' }}
-                                  />
-                                  {nextAllowedStatuses.map((nextSt) => (
-                                    <button
-                                      key={nextSt}
-                                      onClick={() => handleStatusChange(a.id, nextSt)}
-                                      style={{
-                                        padding: '6px 12px', fontSize: '12px', fontWeight: 600, borderRadius: '4px', cursor: 'pointer',
-                                        backgroundColor: nextSt === 'confirmed' ? '#fee2e2' : nextSt === 'resolved' ? '#dcfce7' : '#fff',
-                                        color: nextSt === 'confirmed' ? '#b91c1c' : nextSt === 'resolved' ? '#15803d' : '#0f172a',
-                                        border: nextSt === 'confirmed' ? '1px solid #fca5a5' : nextSt === 'resolved' ? '1px solid #86efac' : '1px solid #cbd5e1'
-                                      }}
-                                    >
-                                      Mark: {nextSt.replace('_', ' ')}
-                                    </button>
-                                  ))}
-                                </div>
-                              </div>
-
-                              {/* Drawer Navigation Tabs */}
-                              <div style={{ display: 'flex', gap: '16px', borderBottom: '1px solid #cbd5e1', marginBottom: '16px' }}>
-                                {['notes', 'evidence', 'history'].map((tabKey) => (
-                                  <button
-                                    key={tabKey}
-                                    onClick={() => setDrawerTab(tabKey)}
-                                    style={{
-                                      padding: '6px 0', border: 'none', background: 'none', cursor: 'pointer',
-                                      fontWeight: 600, fontSize: '12px', textTransform: 'uppercase',
-                                      borderBottom: drawerTab === tabKey ? '2px solid #0f172a' : 'none',
-                                      color: drawerTab === tabKey ? '#0f172a' : '#64748b'
-                                    }}
-                                  >
-                                    {tabKey === 'notes' ? `Notes (${notes.length})` : tabKey === 'evidence' ? 'Technical Evidence' : `Audit Trail (${history.length})`}
-                                  </button>
-                                ))}
-                              </div>
-
-                              {/* Tab Content: Notes */}
-                              {drawerTab === 'notes' && (
-                                <div>
-                                  <div style={{ maxHeight: '200px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '16px' }}>
-                                    {notes.length > 0 ? (
-                                      notes.map((n) => (
-                                        <div key={n.id} style={{ padding: '10px 14px', backgroundColor: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px', fontSize: '12px' }}>
-                                          <div style={{ display: 'flex', justifyContent: 'space-between', color: '#64748b', fontSize: '11px', marginBottom: '4px' }}>
-                                            <span style={{ fontWeight: 600, color: '#1e293b' }}>{n.author_name || n.author_email}</span>
-                                            <span>{new Date(n.created_at).toLocaleString()}</span>
-                                          </div>
-                                          <div style={{ color: '#334155', whiteSpace: 'pre-wrap' }}>{n.note}</div>
-                                        </div>
-                                      ))
-                                    ) : (
-                                      <p style={{ color: '#94a3b8', fontSize: '12px', margin: 0 }}>No analyst notes recorded yet.</p>
-                                    )}
-                                  </div>
-                                  <form onSubmit={(e) => handleAddNote(e, a.id)} style={{ display: 'flex', gap: '8px' }}>
-                                    <input
-                                      type="text"
-                                      placeholder="Add an investigation note (max 2000 chars)..."
-                                      value={newNoteText}
-                                      onChange={(e) => setNewNoteText(e.target.value)}
-                                      maxLength={2000}
-                                      style={{ flex: 1, padding: '8px 12px', fontSize: '12px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
-                                    />
-                                    <button
-                                      type="submit"
-                                      disabled={submittingNote || !newNoteText.trim()}
-                                      style={{ padding: '8px 16px', backgroundColor: '#0f172a', color: '#fff', border: 'none', borderRadius: '4px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}
-                                    >
-                                      {submittingNote ? 'Saving...' : 'Post Note'}
-                                    </button>
-                                  </form>
-                                </div>
-                              )}
-
-                              {/* Tab Content: Technical Evidence */}
-                              {drawerTab === 'evidence' && (
-                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px' }}>
-                                  <div>
-                                    <h5 style={{ margin: '0 0 6px 0', fontSize: '11px', color: '#64748b', textTransform: 'uppercase' }}>Rule Description</h5>
-                                    <p style={{ margin: '0 0 12px 0', fontSize: '12px' }}>{a.description}</p>
-                                    <div style={{ fontSize: '12px', color: '#475569' }}>
-                                      <div><strong>Target:</strong> {a.target_url}</div>
-                                      <div><strong>Hits:</strong> {a.occurrence_count}</div>
-                                      <div><strong>Confidence:</strong> {(a.confidence * 100).toFixed(0)}%</div>
-                                    </div>
-                                  </div>
-                                  <div>
-                                    <h5 style={{ margin: '0 0 6px 0', fontSize: '11px', color: '#64748b', textTransform: 'uppercase' }}>Captured Payload Evidence</h5>
-                                    <pre style={{ margin: 0, padding: '12px', backgroundColor: '#0f172a', color: '#34d399', borderRadius: '6px', fontSize: '11px', overflowX: 'auto', fontFamily: 'monospace' }}>
-                                      {JSON.stringify(a.evidence, null, 2)}
-                                    </pre>
-                                  </div>
-                                </div>
-                              )}
-
-                              {/* Tab Content: Audit History */}
-                              {drawerTab === 'history' && (
-                                <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
-                                  <table style={{ width: '100%', fontSize: '11px', borderCollapse: 'collapse' }}>
-                                    <thead>
-                                      <tr style={{ color: '#64748b', borderBottom: '1px solid #e2e8f0', textAlign: 'left' }}>
-                                        <th style={{ padding: '6px 8px' }}>Action</th>
-                                        <th style={{ padding: '6px 8px' }}>Actor</th>
-                                        <th style={{ padding: '6px 8px' }}>Change Details</th>
-                                        <th style={{ padding: '6px 8px' }}>Timestamp</th>
-                                      </tr>
-                                    </thead>
-                                    <tbody>
-                                      {history.map((h) => (
-                                        <tr key={h.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                                          <td style={{ padding: '6px 8px', fontWeight: 600, color: '#1e293b' }}>{h.action.replace('_', ' ')}</td>
-                                          <td style={{ padding: '6px 8px' }}>{h.actor_name}</td>
-                                          <td style={{ padding: '6px 8px', color: '#475569' }}>
-                                            {h.previous_value && h.new_value ? `${h.previous_value} → ${h.new_value}` : h.new_value || JSON.stringify(h.metadata)}
-                                          </td>
-                                          <td style={{ padding: '6px 8px', color: '#94a3af' }}>{new Date(h.created_at).toLocaleString()}</td>
-                                        </tr>
-                                      ))}
-                                    </tbody>
-                                  </table>
-                                </div>
-                              )}
-                            </td>
-                          </tr>
-                        )}
-                      </React.Fragment>
-                    );
-                  })
-                ) : (
-                  <tr>
-                    <td colSpan="8" style={{ padding: '40px', textAlign: 'center', color: '#9ca3af' }}>No security alerts found matching your criteria.</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      )}
-
-      {/* Tab: Traffic View */}
-      {activeTab === 'traffic' && (
-        <section className="dashboard-card" style={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '12px', padding: '16px' }}>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
-              <thead style={{ backgroundColor: '#f9fafb', color: '#6b7280', fontSize: '11px', textTransform: 'uppercase' }}>
-                <tr>
-                  <th style={{ padding: '10px' }}>Method</th>
-                  <th style={{ padding: '10px' }}>Classification</th>
-                  <th style={{ padding: '10px' }}>Endpoint</th>
-                  <th style={{ padding: '10px' }}>Status</th>
-                  <th style={{ padding: '10px' }}>Time</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredLogs.length > 0 ? filteredLogs.map((l) => (
-                  <tr key={l.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                    <td style={{ padding: '10px', fontWeight: 600 }}>{l.method}</td>
-                    <td style={{ padding: '10px' }}>
-                      <span style={{ padding: '2px 6px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold', backgroundColor: l.classification === 'benign' ? '#f3f4f6' : '#fee2e2', color: l.classification === 'benign' ? '#4b5563' : '#b91c1c', textTransform: 'uppercase' }}>
-                        {l.classification}
-                      </span>
-                    </td>
-                    <td style={{ padding: '10px', fontFamily: 'monospace' }}>{l.endpoint}</td>
-                    <td style={{ padding: '10px' }}>{l.status_code || '—'}</td>
-                    <td style={{ padding: '10px', color: '#6b7280' }}>{new Date(l.created_at).toLocaleTimeString()}</td>
-                  </tr>
-                )) : (
-                  <tr>
-                    <td colSpan="5" style={{ padding: '40px', textAlign: 'center', color: '#9ca3af' }}>No traffic logs matching your criteria.</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      )}
-    </div>
+    <span className={`inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset capitalize ${style}`}>
+      {severity}
+    </span>
   );
 };
 
-export default IntrusionDetection;
+export default function IntrusionDetection() {
+  const [alerts, setAlerts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [severityFilter, setSeverityFilter] = useState('all');
+  const [websiteFilter, setWebsiteFilter] = useState('all');
+  const [selectedAlert, setSelectedAlert] = useState(null);
+
+  const load = () => {
+    setLoading(true);
+    setError('');
+    getAlerts()
+      .then((res) => {
+        const data = res.alerts || res.data || res;
+        setAlerts(Array.isArray(data) ? data : []);
+      })
+      .catch((e) => setError(e.response?.data?.error || e.message || 'Unable to load alerts.'))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  const allWebsites = React.useMemo(() => {
+    const sites = new Set();
+    alerts.forEach(a => {
+      const target = a.target_url || a.endpoint || 'Unknown Website';
+      try { sites.add(new URL(target).origin); }
+      catch { sites.add(target); }
+    });
+    return Array.from(sites).sort();
+  }, [alerts]);
+
+  useEffect(() => {
+    if (websiteFilter === 'all' && allWebsites.length > 0) {
+      setWebsiteFilter(allWebsites[0]);
+    }
+  }, [allWebsites, websiteFilter]);
+
+  const filteredAlerts = alerts.filter(a => {
+    const eventType = (a.classification || a.rule_id || '').toLowerCase();
+    const matchesSearch = 
+      eventType.includes(searchTerm.toLowerCase()) || 
+      (a.source_ip || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (a.description || '').toLowerCase().includes(searchTerm.toLowerCase());
+    
+    const matchesSev = severityFilter === 'all' || a.severity?.toLowerCase() === severityFilter;
+    
+    let website = a.target_url || a.endpoint || 'Unknown Website';
+    try { website = new URL(website).origin; } catch {}
+    const matchesWebsite = websiteFilter === 'all' || website === websiteFilter;
+
+    return matchesSearch && matchesSev && matchesWebsite;
+  });
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-bold leading-7 text-white sm:truncate sm:text-3xl sm:tracking-tight flex items-center gap-2">
+            <Activity className="h-8 w-8 text-brand-500" />
+            Intrusion Detection
+          </h2>
+          <p className="mt-1 text-sm text-slate-400">
+            Real-time monitoring of security events and suspicious activity.
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <button onClick={load} className="btn-secondary" title="Refresh">
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+        
+        {/* Alerts List */}
+        <div className="card xl:col-span-2 flex flex-col h-[calc(100vh-200px)]">
+          <div className="card-header flex flex-col sm:flex-row justify-between gap-4 items-center">
+            <div className="relative w-full">
+              <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+                <Search className="h-4 w-4 text-slate-500" aria-hidden="true" />
+              </div>
+              <input
+                type="text"
+                className="block w-full rounded-md border-0 bg-slate-900 py-1.5 pl-10 text-white shadow-sm ring-1 ring-inset ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-brand-500 sm:text-sm sm:leading-6"
+                placeholder="Search events, IPs, descriptions..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+            </div>
+            <div className="w-full md:w-auto flex flex-col sm:flex-row gap-3 shrink-0">
+              <select
+                value={websiteFilter}
+                onChange={(e) => setWebsiteFilter(e.target.value)}
+                className="block w-full sm:w-48 rounded-md border-0 bg-slate-900 py-1.5 pl-3 pr-10 text-white shadow-sm ring-1 ring-inset ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-brand-500 sm:text-sm sm:leading-6 truncate"
+              >
+                <option value="all">All Websites</option>
+                {allWebsites.map(site => (
+                  <option key={site} value={site}>{site}</option>
+                ))}
+              </select>
+              <select
+                value={severityFilter}
+                onChange={(e) => setSeverityFilter(e.target.value)}
+                className="block w-full sm:w-40 rounded-md border-0 bg-slate-900 py-1.5 pl-3 pr-10 text-white shadow-sm ring-1 ring-inset ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-brand-500 sm:text-sm sm:leading-6"
+              >
+                <option value="all">All Severities</option>
+                <option value="critical">Critical</option>
+                <option value="high">High</option>
+                <option value="medium">Medium</option>
+                <option value="low">Low</option>
+                <option value="info">Info</option>
+              </select>
+            </div>
+          </div>
+          
+          <div className="flex-1 overflow-y-auto bg-slate-900/50">
+            {error && (
+              <div className="p-4 bg-red-500/10 border-b border-red-500/50 flex items-center gap-3">
+                <AlertCircle className="h-5 w-5 text-red-500" />
+                <p className="text-sm text-red-500">{error}</p>
+              </div>
+            )}
+
+            {loading && alerts.length === 0 ? (
+              <div className="p-12 text-center text-slate-400">
+                <RefreshCw className="h-8 w-8 animate-spin mx-auto text-brand-500 mb-3" />
+                <p>Loading security events...</p>
+              </div>
+            ) : filteredAlerts.length > 0 ? (
+              <ul className="divide-y divide-slate-800">
+                {filteredAlerts.map((alert) => (
+                  <li 
+                    key={alert.id} 
+                    className={`p-4 hover:bg-slate-800 cursor-pointer transition-colors ${selectedAlert?.id === alert.id ? 'bg-slate-800 border-l-2 border-brand-500' : 'border-l-2 border-transparent'}`}
+                    onClick={() => setSelectedAlert(alert)}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <SeverityBadge severity={alert.severity} />
+                        <span className="font-semibold text-white capitalize">{alert.classification || alert.rule_id || 'Unknown Event'}</span>
+                      </div>
+                      <span className="text-xs text-slate-500 flex items-center gap-1">
+                        <Clock className="h-3 w-3" />
+                        {new Date(alert.last_seen_at || alert.first_seen_at).toLocaleString()}
+                      </span>
+                    </div>
+                    <div className="mt-2 text-sm text-slate-400 line-clamp-1">
+                      {alert.description}
+                    </div>
+                    {alert.source_ip && (
+                      <div className="mt-2 flex items-center gap-4 text-xs font-mono text-slate-500">
+                        <span className="flex items-center gap-1"><Server className="h-3 w-3" /> SRC: {alert.source_ip}</span>
+                        {(alert.endpoint || alert.target_url) && (
+                          <span className="flex items-center gap-1 truncate"><Server className="h-3 w-3" /> TGT: {alert.endpoint || alert.target_url}</span>
+                        )}
+                      </div>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <div className="p-16 text-center">
+                <Activity className="mx-auto h-12 w-12 text-slate-600 mb-4" />
+                <h3 className="mt-2 text-sm font-semibold text-white">No alerts found</h3>
+                <p className="mt-1 text-sm text-slate-400">
+                  Everything looks quiet.
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Alert Details Panel */}
+        <div className="card h-[calc(100vh-200px)] overflow-y-auto hidden xl:block">
+          <div className="card-header bg-slate-800/50 sticky top-0 backdrop-blur-md z-10">
+            <h3 className="text-base font-semibold leading-6 text-white flex items-center gap-2">
+              <Eye className="h-5 w-5 text-brand-500" />
+              Investigation Details
+            </h3>
+          </div>
+          <div className="p-6">
+            {selectedAlert ? (
+              <div className="space-y-6">
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <SeverityBadge severity={selectedAlert.severity} />
+                    <span className="text-xs text-slate-400">{new Date(selectedAlert.last_seen_at || selectedAlert.first_seen_at).toLocaleString()}</span>
+                  </div>
+                  <h4 className="text-xl font-bold text-white mb-4 capitalize">{selectedAlert.classification || selectedAlert.rule_id}</h4>
+                  
+                  <div className="bg-slate-900 rounded-md p-4 border border-slate-700">
+                    <h5 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Description</h5>
+                    <p className="text-sm text-slate-300">{selectedAlert.description || 'No description available.'}</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-slate-900 rounded-md p-4 border border-slate-700">
+                    <h5 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Source IP</h5>
+                    <p className="text-sm font-mono text-brand-400">{selectedAlert.source_ip || 'N/A'}</p>
+                  </div>
+                  <div className="bg-slate-900 rounded-md p-4 border border-slate-700 overflow-hidden">
+                    <h5 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Target / Endpoint</h5>
+                    <p className="text-sm font-mono text-brand-400 truncate" title={selectedAlert.endpoint || selectedAlert.target_url}>{selectedAlert.endpoint || selectedAlert.target_url || 'N/A'}</p>
+                  </div>
+                </div>
+
+                {selectedAlert.evidence && (
+                  <div>
+                    <h5 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Evidence / Payload</h5>
+                    <pre className="text-xs font-mono text-slate-300 bg-slate-950 p-4 rounded-md border border-slate-800 overflow-x-auto whitespace-pre-wrap">
+                      {typeof selectedAlert.evidence === 'object' 
+                        ? JSON.stringify(selectedAlert.evidence, null, 2) 
+                        : selectedAlert.evidence}
+                    </pre>
+                  </div>
+                )}
+                
+                <div className="pt-4 border-t border-slate-800 flex justify-end gap-2">
+                  <button className="btn-secondary text-xs py-1.5">Acknowledge</button>
+                  <button className="btn-danger text-xs py-1.5">Block IP</button>
+                </div>
+              </div>
+            ) : (
+              <div className="h-full flex flex-col items-center justify-center text-slate-500 mt-20">
+                <Info className="h-12 w-12 mb-4 text-slate-600" />
+                <p>Select an event to view details</p>
+              </div>
+            )}
+          </div>
+        </div>
+        
+      </div>
+    </div>
+  );
+}

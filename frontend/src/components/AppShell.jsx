@@ -1,4 +1,23 @@
-import { useState } from 'react'
-import Navbar from './Navbar'
-import Sidebar from './Sidebar'
-export default function AppShell({ children }) { const [open, setOpen] = useState(false); return <div className={`app-shell ${open ? 'menu-open' : ''}`}><Sidebar onNavigate={() => setOpen(false)} /><div className="shell-main"><Navbar toggleMenu={() => setOpen(!open)} /><main>{children}</main></div></div> }
+import { useState } from 'react';
+import Sidebar from './Sidebar';
+import Navbar from './Navbar';
+
+export default function AppShell({ children }) {
+  const [mobileOpen, setMobileOpen] = useState(false);
+
+  return (
+    <div className="min-h-screen bg-slate-950">
+      <Sidebar mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} />
+      
+      <div className="lg:pl-64 flex flex-col min-h-screen">
+        <Navbar setMobileOpen={setMobileOpen} />
+        
+        <main className="flex-1">
+          <div className="px-4 py-8 sm:px-6 lg:px-8 max-w-7xl mx-auto">
+            {children}
+          </div>
+        </main>
+      </div>
+    </div>
+  );
+}

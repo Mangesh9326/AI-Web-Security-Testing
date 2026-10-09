@@ -1,1 +1,1 @@
-export { Register as default } from './AuthPage'
+export { Register as default } from './AuthPage';
