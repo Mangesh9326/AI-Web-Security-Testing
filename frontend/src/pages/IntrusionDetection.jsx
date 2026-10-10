@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { getAlerts } from '../services/intrusionService';
-import { Activity, ShieldAlert, Search, RefreshCw, AlertCircle, Eye, AlertTriangle, Info, Clock, Server } from 'lucide-react';
+import { getScans } from '../services/scanService';
+import { analyzeIntrusionAlert, generateIntrusionOverview } from '../services/aiService';
+import { Activity, ShieldAlert, Search, RefreshCw, AlertCircle, Eye, AlertTriangle, Info, Clock, Server, BrainCircuit, CheckCircle2 } from 'lucide-react';
 
 const SeverityBadge = ({ severity }) => {
   const styles = {
@@ -21,6 +23,7 @@ const SeverityBadge = ({ severity }) => {
 
 export default function IntrusionDetection() {
   const [alerts, setAlerts] = useState([]);
+  const [allWebsites, setAllWebsites] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
@@ -28,13 +31,37 @@ export default function IntrusionDetection() {
   const [websiteFilter, setWebsiteFilter] = useState('all');
   const [selectedAlert, setSelectedAlert] = useState(null);
 
+  // AI States
+  const [overview, setOverview] = useState(null);
+  const [overviewLoading, setOverviewLoading] = useState(false);
+  const [overviewError, setOverviewError] = useState('');
+  const [aiAnalysis, setAiAnalysis] = useState({});
+
   const load = () => {
     setLoading(true);
     setError('');
-    getAlerts()
-      .then((res) => {
-        const data = res.alerts || res.data || res;
-        setAlerts(Array.isArray(data) ? data : []);
+    
+    Promise.all([
+      getAlerts(),
+      getScans()
+    ])
+      .then(([alertsRes, scansRes]) => {
+        // Set Alerts
+        const alertsData = alertsRes.alerts || alertsRes.data || alertsRes;
+        setAlerts(Array.isArray(alertsData) ? alertsData : []);
+
+        // Build allWebsites globally from all scans
+        const scansData = scansRes.scans || scansRes.data || scansRes;
+        const scansArray = Array.isArray(scansData) ? scansData : [];
+        const sites = new Set();
+        scansArray.forEach(s => {
+          const target = s.target_url;
+          if (target) {
+            try { sites.add(new URL(target).origin); }
+            catch { sites.add(target); }
+          }
+        });
+        setAllWebsites(Array.from(sites).sort());
       })
       .catch((e) => setError(e.response?.data?.error || e.message || 'Unable to load alerts.'))
       .finally(() => setLoading(false));
@@ -44,37 +71,57 @@ export default function IntrusionDetection() {
     load();
   }, []);
 
-  const allWebsites = React.useMemo(() => {
-    const sites = new Set();
-    alerts.forEach(a => {
-      const target = a.target_url || a.endpoint || 'Unknown Website';
-      try { sites.add(new URL(target).origin); }
-      catch { sites.add(target); }
-    });
-    return Array.from(sites).sort();
-  }, [alerts]);
-
-  useEffect(() => {
-    if (websiteFilter === 'all' && allWebsites.length > 0) {
-      setWebsiteFilter(allWebsites[0]);
-    }
-  }, [allWebsites, websiteFilter]);
+  // Removed the useEffect that overrides "all" with the first website
 
   const filteredAlerts = alerts.filter(a => {
-    const eventType = (a.classification || a.rule_id || '').toLowerCase();
     const matchesSearch = 
-      eventType.includes(searchTerm.toLowerCase()) || 
-      (a.source_ip || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (a.description || '').toLowerCase().includes(searchTerm.toLowerCase());
+      (a.classification || '').toLowerCase().includes(searchTerm.toLowerCase()) || 
+      (a.description || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (a.source_ip || '').toLowerCase().includes(searchTerm.toLowerCase());
     
     const matchesSev = severityFilter === 'all' || a.severity?.toLowerCase() === severityFilter;
     
     let website = a.target_url || a.endpoint || 'Unknown Website';
     try { website = new URL(website).origin; } catch {}
     const matchesWebsite = websiteFilter === 'all' || website === websiteFilter;
-
+    
     return matchesSearch && matchesSev && matchesWebsite;
   });
+
+  const handleGenerateOverview = async () => {
+    setOverviewLoading(true);
+    setOverviewError('');
+    try {
+      const res = await generateIntrusionOverview();
+      setOverview(res.overview);
+    } catch (e) {
+      setOverviewError(e.response?.data?.error || e.message || 'Unable to generate AI SOC overview.');
+    } finally {
+      setOverviewLoading(false);
+    }
+  };
+
+  const handleAnalyzeAlert = async (id) => {
+    if (aiAnalysis[id]?.loading) return;
+    
+    setAiAnalysis(prev => ({
+      ...prev,
+      [id]: { ...prev[id], loading: true, error: '' }
+    }));
+    
+    try {
+      const res = await analyzeIntrusionAlert(id);
+      setAiAnalysis(prev => ({
+        ...prev,
+        [id]: { data: res.analysis, loading: false, error: '' }
+      }));
+    } catch (e) {
+      setAiAnalysis(prev => ({
+        ...prev,
+        [id]: { ...prev[id], loading: false, error: e.response?.data?.error || e.message || 'AI Analysis failed.' }
+      }));
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -85,21 +132,87 @@ export default function IntrusionDetection() {
             Intrusion Detection
           </h2>
           <p className="mt-1 text-sm text-slate-400">
-            Real-time monitoring of security events and suspicious activity.
+            Real-time security events and suspicious traffic.
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <button onClick={handleGenerateOverview} className="btn-primary flex items-center gap-2" disabled={overviewLoading || alerts.length === 0}>
+            {overviewLoading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <BrainCircuit className="h-4 w-4" />}
+            AI Threat Overview
+          </button>
           <button onClick={load} className="btn-secondary" title="Refresh">
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
           </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        
+      {/* AI Security Overview Panel */}
+      {(overview || overviewLoading || overviewError) && (
+        <div className="card border-brand-500/30 bg-brand-900/10">
+          <div className="px-6 py-4 border-b border-brand-500/20 flex items-center gap-2">
+            <BrainCircuit className="h-5 w-5 text-brand-400" />
+            <h3 className="text-lg font-semibold text-brand-100">AI Threat Overview</h3>
+            <span className="ml-auto text-xs font-mono bg-brand-500/20 text-brand-300 px-2 py-0.5 rounded">AI-Generated Advisory</span>
+          </div>
+          <div className="p-6">
+            {overviewLoading ? (
+              <div className="flex flex-col items-center justify-center py-8 text-brand-300">
+                <RefreshCw className="h-8 w-8 animate-spin mb-3" />
+                <p>Analyzing intrusion alerts...</p>
+              </div>
+            ) : overviewError ? (
+              <div className="p-4 bg-red-500/10 border-l-2 border-red-500 text-sm text-red-500">
+                <p>{overviewError}</p>
+                <button onClick={handleGenerateOverview} className="mt-2 text-red-400 hover:text-red-300 underline font-medium">Try Again</button>
+              </div>
+            ) : overview ? (
+              <div className="space-y-6">
+                <div>
+                  <h4 className="text-sm font-semibold text-brand-300 uppercase tracking-wider mb-2">Overall Posture</h4>
+                  <p className="text-slate-300 leading-relaxed bg-slate-900/50 p-4 rounded-md border border-slate-700">{overview.overallPosture}</p>
+                </div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <h4 className="text-sm font-semibold text-brand-300 uppercase tracking-wider mb-2">Priority SOC Actions</h4>
+                    <ul className="space-y-2">
+                      {overview.priorityActions?.map((action, i) => (
+                        <li key={i} className="flex items-start gap-2 text-sm text-slate-300">
+                          <CheckCircle2 className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
+                          <span>{action}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-semibold text-brand-300 uppercase tracking-wider mb-2">Common Attack Patterns</h4>
+                    <ul className="space-y-2">
+                      {overview.commonPatterns?.map((pattern, i) => (
+                        <li key={i} className="flex items-start gap-2 text-sm text-slate-300">
+                          <AlertTriangle className="h-4 w-4 text-orange-500 mt-0.5 flex-shrink-0" />
+                          <span>{pattern}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+
+                {overview.limitations && (
+                  <div className="bg-slate-900/50 p-3 rounded border border-slate-800 flex items-start gap-2 mt-4">
+                    <Info className="h-4 w-4 text-slate-400 mt-0.5 flex-shrink-0" />
+                    <p className="text-xs text-slate-400">{overview.limitations}</p>
+                  </div>
+                )}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         {/* Alerts List */}
-        <div className="card xl:col-span-2 flex flex-col h-[calc(100vh-200px)]">
-          <div className="card-header flex flex-col sm:flex-row justify-between gap-4 items-center">
+        <div className="card flex flex-col h-[calc(100vh-200px)]">
+          <div className="card-header flex flex-col sm:flex-row justify-between gap-4">
             <div className="relative w-full">
               <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
                 <Search className="h-4 w-4 text-slate-500" aria-hidden="true" />
@@ -107,12 +220,12 @@ export default function IntrusionDetection() {
               <input
                 type="text"
                 className="block w-full rounded-md border-0 bg-slate-900 py-1.5 pl-10 text-white shadow-sm ring-1 ring-inset ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-brand-500 sm:text-sm sm:leading-6"
-                placeholder="Search events, IPs, descriptions..."
+                placeholder="Search alerts or IPs..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
             </div>
-            <div className="w-full md:w-auto flex flex-col sm:flex-row gap-3 shrink-0">
+            <div className="flex gap-2 w-full sm:w-auto">
               <select
                 value={websiteFilter}
                 onChange={(e) => setWebsiteFilter(e.target.value)}
@@ -162,6 +275,11 @@ export default function IntrusionDetection() {
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
                         <SeverityBadge severity={alert.severity} />
+                        {aiAnalysis[alert.id]?.data?.priority && (
+                          <span className="inline-flex items-center rounded-md bg-brand-500/10 px-2 py-0.5 text-[10px] font-medium text-brand-400 ring-1 ring-inset ring-brand-500/20">
+                            {aiAnalysis[alert.id].data.priority}
+                          </span>
+                        )}
                         <span className="font-semibold text-white capitalize">{alert.classification || alert.rule_id || 'Unknown Event'}</span>
                       </div>
                       <span className="text-xs text-slate-500 flex items-center gap-1">
@@ -227,6 +345,92 @@ export default function IntrusionDetection() {
                   <div className="bg-slate-900 rounded-md p-4 border border-slate-700 overflow-hidden">
                     <h5 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Target / Endpoint</h5>
                     <p className="text-sm font-mono text-brand-400 truncate" title={selectedAlert.endpoint || selectedAlert.target_url}>{selectedAlert.endpoint || selectedAlert.target_url || 'N/A'}</p>
+                  </div>
+                </div>
+
+                {/* AI SOC Analyst Panel */}
+                <div className="bg-brand-900/10 border border-brand-500/30 rounded-lg overflow-hidden mt-6">
+                  <div className="bg-brand-500/10 px-4 py-3 flex items-center justify-between border-b border-brand-500/20">
+                    <h4 className="text-sm font-semibold text-brand-300 flex items-center gap-2">
+                      <BrainCircuit className="h-4 w-4" /> AI SOC Analyst
+                    </h4>
+                    {!aiAnalysis[selectedAlert.id] && (
+                      <button 
+                        onClick={() => handleAnalyzeAlert(selectedAlert.id)}
+                        className="text-xs bg-brand-500 hover:bg-brand-600 text-white px-3 py-1.5 rounded transition-colors"
+                      >
+                        Analyze Alert
+                      </button>
+                    )}
+                  </div>
+                  
+                  <div className="p-4">
+                    {!aiAnalysis[selectedAlert.id] ? (
+                      <p className="text-sm text-slate-400">Run an AI analysis to investigate this threat.</p>
+                    ) : aiAnalysis[selectedAlert.id].loading ? (
+                      <div className="flex items-center gap-3 text-brand-400 text-sm py-2">
+                        <RefreshCw className="h-4 w-4 animate-spin" /> Analyzing intrusion telemetry...
+                      </div>
+                    ) : aiAnalysis[selectedAlert.id].error ? (
+                      <div className="text-sm text-red-400 flex items-start gap-2">
+                        <AlertCircle className="h-4 w-4 mt-0.5" />
+                        <div>
+                          <p>{aiAnalysis[selectedAlert.id].error}</p>
+                          <button 
+                            onClick={() => handleAnalyzeAlert(selectedAlert.id)}
+                            className="mt-2 text-red-400 underline"
+                          >
+                            Retry Analysis
+                          </button>
+                        </div>
+                      </div>
+                    ) : aiAnalysis[selectedAlert.id].data ? (
+                      <div className="space-y-5">
+                        <div>
+                          <h5 className="text-xs font-semibold text-brand-300 uppercase tracking-wider mb-1">Threat Summary</h5>
+                          <p className="text-sm text-slate-300">{aiAnalysis[selectedAlert.id].data.aiSummary}</p>
+                        </div>
+                        
+                        <div className="grid grid-cols-1 gap-5">
+                          <div>
+                            <h5 className="text-xs font-semibold text-brand-300 uppercase tracking-wider mb-1">Attack Scenario</h5>
+                            <p className="text-sm text-slate-300">{aiAnalysis[selectedAlert.id].data.threatExplanation}</p>
+                          </div>
+                          <div>
+                            <h5 className="text-xs font-semibold text-brand-300 uppercase tracking-wider mb-1">Priority Justification ({aiAnalysis[selectedAlert.id].data.priority})</h5>
+                            <p className="text-sm text-slate-300">{aiAnalysis[selectedAlert.id].data.priorityReason}</p>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-5">
+                          <div>
+                            <h5 className="text-xs font-semibold text-brand-300 uppercase tracking-wider mb-2">Response Plan</h5>
+                            <ul className="list-decimal pl-4 space-y-1">
+                              {aiAnalysis[selectedAlert.id].data.responsePlan?.map((step, i) => (
+                                <li key={i} className="text-sm text-slate-300">{step}</li>
+                              ))}
+                            </ul>
+                          </div>
+                          <div>
+                            <h5 className="text-xs font-semibold text-brand-300 uppercase tracking-wider mb-2">Investigation Steps</h5>
+                            <ul className="list-disc pl-4 space-y-1">
+                              {aiAnalysis[selectedAlert.id].data.investigationSteps?.map((step, i) => (
+                                <li key={i} className="text-sm text-slate-300">{step}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-col gap-1 pt-3 border-t border-brand-500/20 text-xs">
+                          <span className="text-slate-400">Confidence: <span className="text-brand-300 font-medium">{aiAnalysis[selectedAlert.id].data.confidence}</span></span>
+                          {aiAnalysis[selectedAlert.id].data.limitations && (
+                            <span className="text-slate-400 max-w-full" title={aiAnalysis[selectedAlert.id].data.limitations}>
+                              Limitations: {aiAnalysis[selectedAlert.id].data.limitations}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
                 </div>
 

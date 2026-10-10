@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { getTrafficLogs } from '../services/intrusionService';
+import { getScans } from '../services/scanService';
 import { FileText, Search, RefreshCw, AlertCircle, Clock, Server, Globe } from 'lucide-react';
 
 export default function Logs() {
   const [logs, setLogs] = useState([]);
+  const [allWebsites, setAllWebsites] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
@@ -12,10 +14,28 @@ export default function Logs() {
   const load = () => {
     setLoading(true);
     setError('');
-    getTrafficLogs()
-      .then((res) => {
-        const data = res.logs || res.data || res;
-        setLogs(Array.isArray(data) ? data : []);
+    
+    Promise.all([
+      getTrafficLogs(),
+      getScans()
+    ])
+      .then(([logsRes, scansRes]) => {
+        // Set Logs
+        const logsData = logsRes.logs || logsRes.data || logsRes;
+        setLogs(Array.isArray(logsData) ? logsData : []);
+
+        // Build allWebsites globally from all scans
+        const scansData = scansRes.scans || scansRes.data || scansRes;
+        const scansArray = Array.isArray(scansData) ? scansData : [];
+        const sites = new Set();
+        scansArray.forEach(s => {
+          const target = s.target_url;
+          if (target) {
+            try { sites.add(new URL(target).origin); }
+            catch { sites.add(target); }
+          }
+        });
+        setAllWebsites(Array.from(sites).sort());
       })
       .catch((e) => setError(e.response?.data?.error || e.message || 'Unable to load traffic logs.'))
       .finally(() => setLoading(false));
@@ -25,21 +45,7 @@ export default function Logs() {
     load();
   }, []);
 
-  const allWebsites = React.useMemo(() => {
-    const sites = new Set();
-    logs.forEach(l => {
-      const target = l.target_url || l.endpoint || 'Unknown Website';
-      try { sites.add(new URL(target).origin); }
-      catch { sites.add(target); }
-    });
-    return Array.from(sites).sort();
-  }, [logs]);
-
-  useEffect(() => {
-    if (websiteFilter === 'all' && allWebsites.length > 0) {
-      setWebsiteFilter(allWebsites[0]);
-    }
-  }, [allWebsites, websiteFilter]);
+  // Removed the useEffect that overrides "all" with the first website
 
   const filteredLogs = logs.filter(l => {
     const matchesSearch = 

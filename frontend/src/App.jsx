@@ -11,6 +11,7 @@ import Dashboard from './pages/Dashboard';
 import NewScan from './pages/NewScan';
 import ScanDetails from './pages/ScanDetails';
 import Vulnerabilities from './pages/Vulnerabilities';
+import Findings from './pages/Findings';
 import IntrusionDetection from './pages/IntrusionDetection';
 import Reports from './pages/Reports';
 import Settings from './pages/Settings';
@@ -46,7 +47,7 @@ const App = () => {
           <Route path="/scans" element={<Scans />} />
           <Route path="/scan/:id" element={<ScanDetails />} />
           <Route path="/vulnerabilities" element={<Vulnerabilities />} />
-          <Route path="/findings" element={<Vulnerabilities />} />
+          <Route path="/findings" element={<Findings />} />
           <Route path="/intrusion-detection" element={<IntrusionDetection />} />
           <Route path="/logs" element={<Logs />} />
           <Route path="/reports" element={<Reports />} />

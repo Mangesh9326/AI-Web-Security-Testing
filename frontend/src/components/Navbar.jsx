@@ -49,7 +49,7 @@ export default function Navbar({ setMobileOpen }) {
               {user?.username?.charAt(0).toUpperCase() || 'U'}
             </div>
             <span className="hidden lg:flex lg:items-center text-sm font-semibold leading-6 text-slate-200">
-              {user?.username || 'Analyst'}
+              {user?.username}
             </span>
           </div>
         </div>

@@ -49,6 +49,7 @@ app.use("/api/auth", authLimiter, authRoutes);
 app.use("/api/scans", scanRoutes);
 app.use("/api/intrusion", intrusuionRoute);
 app.use("/api/profile", require("./routes/profile"));
+app.use("/api/ai", require("./routes/ai"));
 
 app.use((req, res) => {
   res.status(404).json({ error: "Route not found." });
